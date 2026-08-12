@@ -19,13 +19,21 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
   // Per-Device Physical Audio Calibration Offset State & Debug Touch Log
   const [userOffset, setUserOffset] = useState(() => audioEngine.getUserOffset());
   const [lastTouchLog, setLastTouchLog] = useState('');
+  const lastTapTimeRef = useRef(0);
 
-  // Per-Device Sync Calibration Offset Handler (Touch & Pointer Interception + Live Dynamic Audio Shift)
+  // Per-Device Sync Calibration Offset Handler (Touch & Pointer Interception + 250ms Debounce + Live Dynamic Audio Shift)
   const handleAdjustOffset = (deltaSec, e) => {
     if (e) {
       if (e.cancelable) e.preventDefault();
       e.stopPropagation();
     }
+
+    // Swallowing duplicate touch/click synthesized events within 250ms
+    const now = Date.now();
+    if (now - lastTapTimeRef.current < 250) {
+      return;
+    }
+    lastTapTimeRef.current = now;
 
     const currentOffset = audioEngine.getUserOffset();
     const newOffset = deltaSec === 0 ? 0.0 : Number((currentOffset + deltaSec).toFixed(2));
@@ -72,7 +80,7 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
   const [playbackState, setPlaybackState] = useState(() => audioEngine.getPlaybackState());
   const [currentTime, setCurrentTime] = useState(() => audioEngine.getCurrentPosition());
 
-  // Refs for tracking timeline command timestamps
+  // Refs for tracking timeline command timestamps & touch debouncing
   const lastCommandRef = useRef({ position: 0, serverTime: Date.now() });
   const isResyncingRef = useRef(false);
   const fileInputRef = useRef(null);
@@ -80,6 +88,48 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
 
   // Synchronization visual state
   const [syncState, setSyncState] = useState('READY');
+
+  // Top-Level Helper for Processing & Decoding Selected Audio Track (Safe from Scope Errors)
+  const processSongSelection = async (payload) => {
+    if (!payload || !payload.name) return;
+    console.log('[Room] Processing song selection payload:', payload);
+    setSongMetadata({
+      name: payload.name,
+      duration: payload.duration,
+      size: payload.size,
+      type: payload.type
+    });
+    setSongPrepState('SONG SELECTED');
+
+    if (!isHost && payload.audioUrl) {
+      try {
+        setSongPrepState('PREPARING');
+        const fullAudioUrl = payload.audioUrl.startsWith('http') 
+          ? payload.audioUrl 
+          : `${BACKEND_URL}${payload.audioUrl}`;
+
+        console.log('[Room] Speaker downloading audio file from:', fullAudioUrl);
+        const response = await fetch(fullAudioUrl);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+        const blob = await response.blob();
+        const file = new File([blob], payload.name, { type: payload.type || 'audio/mpeg' });
+
+        const meta = await audioEngine.loadAndDecodeAudioFile(file);
+        setSongMetadata(meta);
+        setSongPrepState('READY');
+        console.log('[Room] Speaker audio decoded successfully.');
+
+        if (socket.connected) {
+          socket.emit('AUDIO_READY', { roomCode });
+        }
+      } catch (err) {
+        console.error('[Room] Speaker audio download/decode error:', err);
+        setSongPrepState('NO SONG');
+        setFileError('Failed to download audio file from room host.');
+      }
+    }
+  };
 
   // Socket & Clock Sync Initialization
   useEffect(() => {
@@ -110,68 +160,6 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
         setDevices(data.devices);
       }
     };
-
-    // Listen for Backend SONG_SELECTED Broadcast
-    const handleSongSelected = async (payload) => {
-      console.log('[Room] Received SONG_SELECTED event from server:', payload);
-      setSongMetadata({
-        name: payload.name,
-        duration: payload.duration,
-        size: payload.size,
-        type: payload.type
-      });
-      setSongPrepState('SONG SELECTED');
-
-      // If this device is a Speaker, download audio file via HTTP
-      if (!isHost && payload.audioUrl) {
-        try {
-          setSongPrepState('PREPARING');
-          const fullAudioUrl = payload.audioUrl.startsWith('http') 
-            ? payload.audioUrl 
-            : `${BACKEND_URL}${payload.audioUrl}`;
-
-          console.log('[Room] Speaker downloading audio file from:', fullAudioUrl);
-          const response = await fetch(fullAudioUrl);
-          if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-
-          const blob = await response.blob();
-          const file = new File([blob], payload.name, { type: payload.type || 'audio/mpeg' });
-
-          const meta = await audioEngine.loadAndDecodeAudioFile(file);
-          setSongMetadata(meta);
-          setSongPrepState('READY');
-          console.log('[Room] Speaker audio decoded successfully.');
-
-          // Report AUDIO_READY to backend server
-          socket.emit('AUDIO_READY', { roomCode });
-        } catch (err) {
-          console.error('[Room] Speaker audio download/decode error:', err);
-          setSongPrepState('NO SONG');
-          setFileError('Failed to download audio file from room host.');
-        }
-      }
-    };
-
-  // Per-Device Sync Calibration Offset Handler (Instant Dynamic Audio Shift)
-  const handleAdjustOffset = (deltaSec) => {
-    setUserOffset((prevOffset) => {
-      let newOffset = 0.0;
-      if (deltaSec !== 0) {
-        newOffset = Number((prevOffset + deltaSec).toFixed(2));
-      }
-      console.log(`[Room Offset Adjust] Tapped delta (${deltaSec > 0 ? '+' : ''}${deltaSec}s). New offset: ${newOffset.toFixed(2)}s`);
-      audioEngine.setUserOffset(newOffset);
-
-      // If audio is actively playing, dynamically shift active sound position by deltaSec!
-      if (audioEngine.getPlaybackState() === 'PLAYING') {
-        const currentPos = audioEngine.getCurrentPosition();
-        const newPos = Math.max(0, currentPos - deltaSec);
-        console.log(`[Room Offset Adjust] Dynamic live audio shift from ${currentPos.toFixed(2)}s to ${newPos.toFixed(2)}s`);
-        audioEngine.seek(newPos);
-      }
-      return newOffset;
-    });
-  };
 
   // Listen for Room PLAYBACK_COMMAND Broadcast (Synchronized Initial Start & Playback Commands)
   const handlePlaybackCommand = async (payload) => {
@@ -243,13 +231,13 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
     };
 
     socket.on('DEVICE_UPDATE', handleDeviceUpdate);
-    socket.on('SONG_SELECTED', handleSongSelected);
+    socket.on('SONG_SELECTED', processSongSelection);
     socket.on('PLAYBACK_COMMAND', handlePlaybackCommand);
 
     return () => {
       clockSync.stopAutoSync();
       socket.off('DEVICE_UPDATE', handleDeviceUpdate);
-      socket.off('SONG_SELECTED', handleSongSelected);
+      socket.off('SONG_SELECTED', processSongSelection);
       socket.off('PLAYBACK_COMMAND', handlePlaybackCommand);
       if (animFrameRef.current) {
         cancelAnimationFrame(animFrameRef.current);
@@ -261,16 +249,16 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
   useEffect(() => {
     if (initialRoomData && initialRoomData.selectedAudio && songPrepState === 'NO SONG') {
       console.log('[Room Auto-Sync] Preloaded song detected from initialRoomData:', initialRoomData.selectedAudio);
-      handleSongSelected(initialRoomData.selectedAudio);
+      processSongSelection(initialRoomData.selectedAudio);
     } else if (songPrepState === 'NO SONG') {
       socket.emit('GET_ROOM_STATE', { roomCode }, (res) => {
         if (res && res.success && res.room && res.room.selectedAudio) {
           console.log('[Room Auto-Sync] Preloaded song fetched via GET_ROOM_STATE:', res.room.selectedAudio);
-          handleSongSelected(res.room.selectedAudio);
+          processSongSelection(res.room.selectedAudio);
         }
       });
     }
-  }, [initialRoomData, roomCode]);
+  }, [initialRoomData, roomCode, songPrepState]);
 
   // Mobile Screen-Off & Background Recovery (visibilitychange / pageshow / focus)
   useEffect(() => {
@@ -293,7 +281,7 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
 
         socket.emit('GET_ROOM_STATE', { roomCode }, (res) => {
           if (res && res.success && res.room && res.room.selectedAudio && songPrepState === 'NO SONG') {
-            handleSongSelected(res.room.selectedAudio);
+            processSongSelection(res.room.selectedAudio);
           }
         });
       }
