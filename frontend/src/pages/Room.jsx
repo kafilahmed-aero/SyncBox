@@ -93,6 +93,7 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
   const animFrameRef = useRef(null);
   const localFilesRef = useRef(new Map());
   const isAutoAdvancingRef = useRef(false);
+  const lastUiUpdateRef = useRef(0);
 
   // Synchronization visual state
   const [syncState, setSyncState] = useState('READY');
@@ -350,7 +351,7 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
         cancelAnimationFrame(animFrameRef.current);
       }
     };
-  }, [roomCode, isHost, speakerReady, songPrepState]);
+  }, [roomCode, isHost]);
   useEffect(() => {
     if (initialRoomData && initialRoomData.selectedAudio && songPrepState === 'NO SONG') {
       console.log('[Room Auto-Sync] Preloaded song detected from initialRoomData:', initialRoomData.selectedAudio);
@@ -482,14 +483,19 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
     };
   }, [playbackState, songPrepState]);
 
-  // requestAnimationFrame UI update loop while playing
+  // requestAnimationFrame UI update loop while playing (Throttled to 100ms / 10 FPS to prevent tab freezing)
   useEffect(() => {
     const updateProgress = () => {
       const currentState = audioEngine.getPlaybackState();
       const pos = audioEngine.getCurrentPosition();
+      const now = performance.now();
 
-      setPlaybackState(currentState);
-      setCurrentTime(pos);
+      // Only update time state every ~100ms to eliminate main-thread CPU thrashing
+      if (now - lastUiUpdateRef.current >= 100) {
+        lastUiUpdateRef.current = now;
+        setCurrentTime(pos);
+        setPlaybackState(prev => prev !== currentState ? currentState : prev);
+      }
 
       if (currentState === 'PLAYING') {
         animFrameRef.current = requestAnimationFrame(updateProgress);
