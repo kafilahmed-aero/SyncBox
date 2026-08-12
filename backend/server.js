@@ -94,6 +94,15 @@ io.on('connection', (socket) => {
     }
   });
 
+  // GET_ROOM_STATE (Fetch complete room state for newly joined or reconnected devices)
+  socket.on('GET_ROOM_STATE', (data = {}, callback) => {
+    const roomCode = data.roomCode || roomManager.getRoomBySocket(socket.id);
+    const serialized = roomManager.serializeRoom(roomCode);
+    if (typeof callback === 'function') {
+      callback({ success: !!serialized, room: serialized });
+    }
+  });
+
   // 3. LEAVE_ROOM
   socket.on('LEAVE_ROOM', (data = {}, callback) => {
     const result = roomManager.leaveRoom(socket.id);

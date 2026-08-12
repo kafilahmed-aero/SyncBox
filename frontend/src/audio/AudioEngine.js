@@ -17,6 +17,16 @@ class AudioEngine {
     this.sourceGeneration = 0;
     this.onEndedCallback = null;
     this.playbackRateValue = 1.0;
+
+    // Load per-device physical offset calibration from localStorage (defaults to 0.0s)
+    let savedOffset = 0.0;
+    try {
+      const stored = localStorage.getItem('syncbox_user_offset');
+      if (stored !== null && !isNaN(Number(stored))) {
+        savedOffset = Number(stored);
+      }
+    } catch (e) {}
+    this.userOffsetSec = savedOffset;
   }
 
   /**
@@ -177,6 +187,24 @@ class AudioEngine {
   }
 
   /**
+   * Returns current user calibration offset in seconds.
+   */
+  getUserOffset() {
+    return this.userOffsetSec || 0.0;
+  }
+
+  /**
+   * Sets per-device calibration offset in seconds and persists in localStorage.
+   */
+  setUserOffset(offsetSec) {
+    const val = Math.max(-5.0, Math.min(5.0, Number(offsetSec) || 0.0));
+    this.userOffsetSec = val;
+    try {
+      localStorage.setItem('syncbox_user_offset', String(val.toFixed(2)));
+    } catch (e) {}
+  }
+
+  /**
    * Returns total hardware audio output latency in seconds (baseLatency + outputLatency)
    * using safe feature detection across desktop and mobile browsers.
    */
@@ -186,13 +214,14 @@ class AudioEngine {
 
   /**
    * Returns estimated physical sound position reaching the speakers in seconds
-   * by compensating for hardware audio output pipeline latency.
+   * by compensating for hardware audio output pipeline latency and per-device user offset.
    */
   getAcousticPosition() {
     const rawPos = this.getCurrentPosition();
     if (this.playbackState !== 'PLAYING') return rawPos;
     const latencySec = this.getOutputLatency();
-    return Math.max(0, rawPos - (latencySec * this.playbackRateValue));
+    const netPos = rawPos - (latencySec * this.playbackRateValue) + this.userOffsetSec;
+    return Math.max(0, netPos);
   }
 
   /**

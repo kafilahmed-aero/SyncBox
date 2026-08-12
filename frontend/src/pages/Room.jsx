@@ -8,17 +8,16 @@ import { audioEngine } from '../audio/AudioEngine';
 import { clockSync } from '../audio/ClockSync';
 import { socket } from '../socket';
 
-// TEMPORARY CONTROLLED DIAGNOSTIC MODE FLAG (Set to false to restore normal auto-correction)
-const SYNC_DIAGNOSTIC_MODE = true;
-const DIAGNOSTIC_SPEAKER_DELAY_SEC = 1.000; // 1000ms intentional delay for Speaker
-
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:4000';
 
-export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }) {
+export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomData = null, onLeaveRoom }) {
   // Speaker Web Audio API activation state
   const [speakerReady, setSpeakerReady] = useState(() => audioEngine.isReady());
   const [isActivating, setIsActivating] = useState(false);
   const [audioError, setAudioError] = useState(null);
+
+  // Per-Device Physical Audio Calibration Offset State (seconds, saved per-device in localStorage)
+  const [userOffset, setUserOffset] = useState(() => audioEngine.getUserOffset());
 
   // Real Audio Preparation State (NO SONG | SONG SELECTED | PREPARING | READY)
   const [songPrepState, setSongPrepState] = useState(() => {
@@ -120,61 +119,67 @@ export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }
       }
     };
 
-    // Listen for Room PLAYBACK_COMMAND Broadcast (Synchronized Initial Start & Playback Commands)
-    const handlePlaybackCommand = async (payload) => {
-      console.log('[Room] Received PLAYBACK_COMMAND:', payload);
-      if (!payload || !payload.command) return;
+  // Per-Device Sync Calibration Offset Handler
+  const handleAdjustOffset = (deltaSec) => {
+    let newOffset = 0.0;
+    if (deltaSec !== 0) {
+      newOffset = Number((userOffset + deltaSec).toFixed(2));
+    }
+    setUserOffset(newOffset);
+    audioEngine.setUserOffset(newOffset);
+  };
 
-      const { command, position = 0, serverTime, playAtTimestamp } = payload;
-      
-      // Store timeline reference
-      lastCommandRef.current = {
-        position: position,
-        serverTime: playAtTimestamp || serverTime || Date.now()
-      };
+  // Listen for Room PLAYBACK_COMMAND Broadcast (Synchronized Initial Start & Playback Commands)
+  const handlePlaybackCommand = async (payload) => {
+    console.log('[Room] Received PLAYBACK_COMMAND:', payload);
+    if (!payload || !payload.command) return;
 
-      if (command === 'PLAY') {
-        audioEngine.setPlaybackRate(1.000);
-        if (playAtTimestamp) {
-          const delta = playAtTimestamp - clockSync.getServerTime();
+    const { command, position = 0, serverTime, playAtTimestamp } = payload;
+    
+    // Store timeline reference
+    lastCommandRef.current = {
+      position: position,
+      serverTime: playAtTimestamp || serverTime || Date.now()
+    };
 
-          if (delta > 0) {
-            // Future target: schedule Web Audio start compensated for hardware output latency
-            const ctx = audioEngine.getAudioContext();
-            const rawTargetAudioCtxTime = clockSync.toAudioContextTime(playAtTimestamp, ctx);
-            const outputLatencySec = audioEngine.getOutputLatency();
-            let targetAudioCtxTime = Math.max(ctx.currentTime, rawTargetAudioCtxTime - outputLatencySec);
+    if (command === 'PLAY') {
+      audioEngine.setPlaybackRate(1.000);
+      const userOffsetSec = audioEngine.getUserOffset();
 
-            // Intentional 1-second delay on Speaker
-            if (!isHost) {
-              console.log('[Room] Speaker applying 1.0s scheduling delay');
-              targetAudioCtxTime += 1.0;
-            }
+      if (playAtTimestamp) {
+        const delta = playAtTimestamp - clockSync.getServerTime();
 
-            console.log(`[Room] Scheduling playback at AudioContext time ${targetAudioCtxTime.toFixed(3)}s (in ${delta.toFixed(1)}ms)`);
-            await audioEngine.playScheduled(targetAudioCtxTime, position);
-          } else {
-            // Late arrival fallback: schedule 1 sec later for Speaker, or immediately for Host
-            const lateMs = Math.abs(delta);
-            const adjustedPosition = position + (lateMs / 1000);
-            const totalDuration = audioEngine.getDuration();
-            const clampedPosition = Math.min(adjustedPosition, totalDuration);
-            const ctx = audioEngine.getAudioContext();
+        if (delta > 0) {
+          // Future target: schedule Web Audio start compensated for output latency and per-device user offset
+          const ctx = audioEngine.getAudioContext();
+          const rawTargetAudioCtxTime = clockSync.toAudioContextTime(playAtTimestamp, ctx);
+          const outputLatencySec = audioEngine.getOutputLatency();
+          const targetAudioCtxTime = Math.max(ctx.currentTime, rawTargetAudioCtxTime - outputLatencySec + userOffsetSec);
 
-            if (!isHost) {
-              const speakerDelayedTarget = ctx.currentTime + 1.0;
-              console.log(`[Room] Speaker late arrival. Delaying start by 1.0s at AudioContext time ${speakerDelayedTarget.toFixed(3)}s`);
-              await audioEngine.playScheduled(speakerDelayedTarget, position);
-            } else {
-              console.log(`[Room] Host late arrival (${lateMs.toFixed(1)}ms late). Starting immediately at adjusted pos ${clampedPosition.toFixed(2)}s`);
-              await audioEngine.playScheduled(0, clampedPosition);
-            }
-          }
+          console.log(`[Room] Scheduling playback at AudioContext time ${targetAudioCtxTime.toFixed(3)}s (userOffset: ${userOffsetSec.toFixed(2)}s)`);
+          await audioEngine.playScheduled(targetAudioCtxTime, position);
         } else {
-          await audioEngine.play();
+          // Late arrival fallback: schedule using userOffset or start immediately
+          const lateMs = Math.abs(delta);
+          const adjustedPosition = position + (lateMs / 1000);
+          const totalDuration = audioEngine.getDuration();
+          const clampedPosition = Math.min(adjustedPosition, totalDuration);
+          const ctx = audioEngine.getAudioContext();
+
+          if (userOffsetSec !== 0) {
+            const delayedTarget = Math.max(ctx.currentTime, ctx.currentTime + userOffsetSec);
+            console.log(`[Room] Late arrival with userOffset (${userOffsetSec}s). Scheduling at AudioContext time ${delayedTarget.toFixed(3)}s`);
+            await audioEngine.playScheduled(delayedTarget, position);
+          } else {
+            console.log(`[Room] Late arrival (${lateMs.toFixed(1)}ms late). Starting immediately at pos ${clampedPosition.toFixed(2)}s`);
+            await audioEngine.playScheduled(0, clampedPosition);
+          }
         }
-        setPlaybackState('PLAYING');
-        setSyncState('SYNCED');
+      } else {
+        await audioEngine.play();
+      }
+      setPlaybackState('PLAYING');
+      setSyncState('SYNCED');
       } else if (command === 'PAUSE') {
         audioEngine.pause();
         setPlaybackState('PAUSED');
@@ -208,20 +213,69 @@ export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }
     };
   }, [roomCode, isHost]);
 
-  // Phase 7.1 Continuous Real-Time Synchronization Loop (500ms interval)
+  // Preloaded Room Song Auto-Sync on Join & Mount
+  useEffect(() => {
+    if (initialRoomData && initialRoomData.selectedAudio && songPrepState === 'NO SONG') {
+      console.log('[Room Auto-Sync] Preloaded song detected from initialRoomData:', initialRoomData.selectedAudio);
+      handleSongSelected(initialRoomData.selectedAudio);
+    } else if (songPrepState === 'NO SONG') {
+      socket.emit('GET_ROOM_STATE', { roomCode }, (res) => {
+        if (res && res.success && res.room && res.room.selectedAudio) {
+          console.log('[Room Auto-Sync] Preloaded song fetched via GET_ROOM_STATE:', res.room.selectedAudio);
+          handleSongSelected(res.room.selectedAudio);
+        }
+      });
+    }
+  }, [initialRoomData, roomCode]);
+
+  // Mobile Screen-Off & Background Recovery (visibilitychange / pageshow / focus)
+  useEffect(() => {
+    const handleLifecycleRecovery = async () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[Room Lifecycle] Device foregrounded. Recovering connection & audio state...');
+        if (!socket.connected) {
+          socket.connect();
+        }
+        try {
+          const ctx = audioEngine.getAudioContext();
+          if (ctx && ctx.state === 'suspended') {
+            await ctx.resume();
+          }
+        } catch (e) {}
+
+        if (speakerReady && songPrepState === 'READY') {
+          socket.emit('AUDIO_READY', { roomCode });
+        }
+
+        socket.emit('GET_ROOM_STATE', { roomCode }, (res) => {
+          if (res && res.success && res.room && res.room.selectedAudio && songPrepState === 'NO SONG') {
+            handleSongSelected(res.room.selectedAudio);
+          }
+        });
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleLifecycleRecovery);
+    window.addEventListener('pageshow', handleLifecycleRecovery);
+    window.addEventListener('focus', handleLifecycleRecovery);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleLifecycleRecovery);
+      window.removeEventListener('pageshow', handleLifecycleRecovery);
+      window.removeEventListener('focus', handleLifecycleRecovery);
+    };
+  }, [roomCode, speakerReady, songPrepState]);
+
+  // Continuous Real-Time Synchronization Loop (500ms interval)
   useEffect(() => {
     if (playbackState !== 'PLAYING' || songPrepState !== 'READY') {
       audioEngine.setPlaybackRate(1.000);
       setDriftStats({ driftMs: 0, playbackRate: 1.0, status: 'Stopped' });
-      isResyncingRef.current = false;
       return;
     }
 
     const checkDrift = async () => {
       if (audioEngine.getPlaybackState() !== 'PLAYING') return;
-
-      // Ignore drift check if hard resync is currently in progress
-      if (isResyncingRef.current) return;
 
       const serverNow = clockSync.getServerTime();
       const playStartPosition = lastCommandRef.current.position;
@@ -247,17 +301,6 @@ export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }
       const driftMs = (clientPosition - expectedPosition) * 1000;
       const absDrift = Math.abs(driftMs);
 
-      // TEMPORARY DIAGNOSTIC MODE: Calculate & display drift, but DO NOT execute correction
-      if (SYNC_DIAGNOSTIC_MODE) {
-        audioEngine.setPlaybackRate(1.000);
-        setDriftStats({
-          driftMs,
-          playbackRate: 1.000,
-          status: isHost ? 'DIAGNOSTIC (HOST)' : 'DIAGNOSTIC (+1000ms Delay)'
-        });
-        return;
-      }
-
       let currentRate = audioEngine.getPlaybackRate();
 
       if (absDrift <= 20) {
@@ -265,16 +308,18 @@ export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }
         audioEngine.setPlaybackRate(1.000);
         currentRate = 1.000;
         setDriftStats({ driftMs, playbackRate: 1.000, status: 'Synced' });
-      } else if (absDrift <= 200) {
-        // SMALL/MEDIUM DRIFT: 20ms < |drift| <= 200ms
+      } else {
+        // CONTINUOUS SOFT MICRO-TUNING (No hard resync position skips)
         if (driftMs > 0) {
-          // Client ahead -> slow down to 0.995
-          audioEngine.setPlaybackRate(0.995);
-          currentRate = 0.995;
+          // Client ahead -> slow down rate
+          const targetRate = absDrift > 500 ? 0.980 : 0.995;
+          audioEngine.setPlaybackRate(targetRate);
+          currentRate = targetRate;
         } else {
-          // Client behind -> speed up to 1.005
-          audioEngine.setPlaybackRate(1.005);
-          currentRate = 1.005;
+          // Client behind -> speed up rate
+          const targetRate = absDrift > 500 ? 1.020 : 1.005;
+          audioEngine.setPlaybackRate(targetRate);
+          currentRate = targetRate;
         }
 
         // Restore 1.000 once within <= 10ms
@@ -283,30 +328,7 @@ export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }
           currentRate = 1.000;
         }
 
-        setDriftStats({ driftMs, playbackRate: currentRate, status: 'Soft Correcting' });
-      } else {
-        // LARGE DRIFT: |drift| > 200ms -> HARD RESYNC to FUTURE Server Timestamp
-        console.warn(`[Phase 7.1 Sync] Large drift detected (${driftMs.toFixed(1)}ms). Scheduling future hard resync...`);
-        isResyncingRef.current = true;
-        setDriftStats({ driftMs, playbackRate: 1.000, status: 'Resyncing...' });
-
-        // Schedule future server timestamp (+500ms)
-        const resyncServerTime = serverNow + 500;
-        const resyncPosition = Math.min(
-          playStartPosition + (resyncServerTime - playStartServerTime) / 1000,
-          totalDuration
-        );
-
-        const ctx = audioEngine.getAudioContext();
-        const targetAudioCtxTime = clockSync.toAudioContextTime(resyncServerTime, ctx);
-
-        audioEngine.setPlaybackRate(1.000);
-        await audioEngine.playScheduled(targetAudioCtxTime, resyncPosition);
-
-        // Reset resyncing protection flag once target time has passed
-        setTimeout(() => {
-          isResyncingRef.current = false;
-        }, 600);
+        setDriftStats({ driftMs, playbackRate: currentRate, status: 'Soft Micro-Tuning' });
       }
     };
 
@@ -476,13 +498,8 @@ export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }
                 {isHost ? 'HOST VIEW' : 'SPEAKER VIEW'}
               </span>
             </div>
-            {/* Extended Diagnostics Badge */}
+            {/* Extended Diagnostics & Per-Device Calibration Controls */}
             <div style={{ marginTop: '0.4rem', display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-              {SYNC_DIAGNOSTIC_MODE && (
-                <span className="badge badge-status-default" style={{ fontSize: '0.65rem', textTransform: 'none', backgroundColor: '#4C1D95', color: '#E9D5FF' }}>
-                  🧪 SYNC DIAGNOSTIC MODE: ON ({isHost ? 'HOST' : 'SPEAKER +1000ms'}) • Correction: DISABLED
-                </span>
-              )}
               <span className="badge badge-status-default" style={{ fontSize: '0.65rem', textTransform: 'none' }}>
                 🕒 Clock: {clockStats.isSynced ? `Offset ${clockStats.offset >= 0 ? '+' : ''}${clockStats.offset.toFixed(1)}ms • RTT ${clockStats.rtt.toFixed(1)}ms` : 'Syncing...'}
               </span>
@@ -498,6 +515,18 @@ export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }
                   return `BaseLat: ${base} • OutLat: ${out} • Timestamp: ${ts}`;
                 })()}
               </span>
+            </div>
+
+            {/* Per-Device Interactive Calibration Controls */}
+            <div style={{ marginTop: '0.5rem', padding: '0.4rem 0.6rem', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.7rem', fontWeight: 600, color: '#A7F3D0' }}>
+                🎛️ Physical Offset: {userOffset >= 0 ? `+${userOffset.toFixed(2)}s` : `${userOffset.toFixed(2)}s`}
+              </span>
+              <button type="button" className="btn btn-secondary" style={{ padding: '0.15rem 0.4rem', fontSize: '0.65rem' }} onClick={() => handleAdjustOffset(-1.0)}>-1s</button>
+              <button type="button" className="btn btn-secondary" style={{ padding: '0.15rem 0.4rem', fontSize: '0.65rem' }} onClick={() => handleAdjustOffset(-0.1)}>-0.1s</button>
+              <button type="button" className="btn btn-secondary" style={{ padding: '0.15rem 0.4rem', fontSize: '0.65rem' }} onClick={() => handleAdjustOffset(0.1)}>+0.1s</button>
+              <button type="button" className="btn btn-secondary" style={{ padding: '0.15rem 0.4rem', fontSize: '0.65rem' }} onClick={() => handleAdjustOffset(1.0)}>+1s</button>
+              <button type="button" className="btn btn-secondary" style={{ padding: '0.15rem 0.4rem', fontSize: '0.65rem' }} onClick={() => handleAdjustOffset(0)}>Reset</button>
             </div>
           </div>
           <button 

@@ -11,6 +11,8 @@ export default function App() {
   const [roomCode, setRoomCode] = useState('ABC123');
   const [isHost, setIsHost] = useState(true);
 
+  const [initialRoomData, setInitialRoomData] = useState(null);
+
   const handleNavigate = (screen) => {
     setCurrentScreen(screen);
   };
@@ -18,16 +20,19 @@ export default function App() {
   const handleCreateRoom = (code = 'ABC123') => {
     setRoomCode(code);
     setIsHost(true);
+    setInitialRoomData(null);
     setCurrentScreen('room');
   };
 
-  const handleJoinRoom = (code = 'ABC123') => {
+  const handleJoinRoom = (code = 'ABC123', roomData = null) => {
     setRoomCode(code || 'ABC123');
     setIsHost(false);
+    setInitialRoomData(roomData);
     setCurrentScreen('room');
   };
 
   const handleLeaveRoom = () => {
+    setInitialRoomData(null);
     setCurrentScreen('home');
   };
 
@@ -58,6 +63,7 @@ export default function App() {
           <Room 
             roomCode={roomCode} 
             isHost={isHost}
+            initialRoomData={initialRoomData}
             onLeaveRoom={handleLeaveRoom} 
           />
         )}

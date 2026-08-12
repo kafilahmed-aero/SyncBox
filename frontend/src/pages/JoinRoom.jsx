@@ -38,7 +38,7 @@ export default function JoinRoom({ onJoinRoom, onNavigate }) {
       setIsJoining(false);
 
       if (res && res.success) {
-        onJoinRoom(res.roomCode, false);
+        onJoinRoom(res.roomCode, res.room);
       } else {
         setError(res?.error || 'Room not found. Please check your room code.');
       }
