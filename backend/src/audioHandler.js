@@ -47,9 +47,9 @@ export const upload = multer({
  * Registers HTTP audio routes and handles upload / download pipeline.
  */
 export function registerAudioRoutes(app, roomManager, io) {
-  // 1. POST /upload-audio (Host File Upload)
+  // 1. POST /upload-audio (Host File Batch Upload)
   app.post('/upload-audio', (req, res) => {
-    upload.single('audio')(req, res, (err) => {
+    upload.array('audio', 20)(req, res, (err) => {
       if (err) {
         if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
           return res.status(400).json({ success: false, error: 'File size exceeds maximum 50MB limit.' });
@@ -57,47 +57,57 @@ export function registerAudioRoutes(app, roomManager, io) {
         return res.status(400).json({ success: false, error: err.message || 'Audio upload failed.' });
       }
 
-      if (!req.file) {
-        return res.status(400).json({ success: false, error: 'No audio file provided in upload request.' });
+      const files = req.files || (req.file ? [req.file] : []);
+      if (!files || files.length === 0) {
+        return res.status(400).json({ success: false, error: 'No audio files provided in upload request.' });
       }
 
       const roomCode = req.body.roomCode;
       if (!roomCode) {
-        // Clean up uploaded file if roomCode is missing
-        fs.unlink(req.file.path, () => {});
+        files.forEach(f => fs.unlink(f.path, () => {}));
         return res.status(400).json({ success: false, error: 'roomCode is required.' });
       }
 
       const room = roomManager.getRoom(roomCode);
       if (!room) {
-        fs.unlink(req.file.path, () => {});
+        files.forEach(f => fs.unlink(f.path, () => {}));
         return res.status(404).json({ success: false, error: 'Room not found. Please check your room code.' });
       }
 
-      const songId = path.basename(req.file.filename, path.extname(req.file.filename));
-      const audioUrl = `/audio/${songId}`;
+      const uploadedTracks = files.map((f, idx) => {
+        const songId = path.basename(f.filename, path.extname(f.filename));
+        const audioUrl = `/audio/${songId}`;
+        return {
+          songId: songId,
+          name: f.originalname,
+          size: f.size,
+          type: f.mimetype,
+          duration: req.body.durations ? (Array.isArray(req.body.durations) ? Number(req.body.durations[idx]) : Number(req.body.durations)) : 0,
+          filePath: f.path,
+          audioUrl: audioUrl
+        };
+      });
 
-      const audioData = {
-        songId: songId,
-        name: req.file.originalname,
-        size: req.file.size,
-        type: req.file.mimetype,
-        duration: req.body.duration ? Number(req.body.duration) : 0,
-        filePath: req.file.path,
-        audioUrl: audioUrl
-      };
+      const updatedRoom = roomManager.setRoomPlaylist(roomCode, uploadedTracks);
+      console.log(`[SyncBox Backend] ${uploadedTracks.length} tracks uploaded for room ${roomCode}`);
 
-      roomManager.setRoomAudio(roomCode, audioData);
-      console.log(`[SyncBox Backend] Audio uploaded for room ${roomCode}: ${audioData.name} (${songId})`);
+      const currentTrack = updatedRoom ? updatedRoom.selectedAudio : uploadedTracks[0];
 
-      // Broadcast SONG_SELECTED over Socket.IO to room members
-      io.to(room.roomCode).emit('SONG_SELECTED', {
-        songId: audioData.songId,
-        name: audioData.name,
-        size: audioData.size,
-        type: audioData.type,
-        duration: audioData.duration,
-        audioUrl: audioData.audioUrl
+      // Broadcast SONG_SELECTED for first track over Socket.IO to room members
+      if (currentTrack) {
+        const { filePath, ...publicAudio } = currentTrack;
+        io.to(room.roomCode).emit('SONG_SELECTED', publicAudio);
+      }
+
+      // Broadcast PLAYLIST_UPDATE over Socket.IO
+      const publicPlaylist = (updatedRoom ? updatedRoom.playlist : uploadedTracks).map(t => {
+        const { filePath, ...pub } = t;
+        return pub;
+      });
+      io.to(room.roomCode).emit('PLAYLIST_UPDATE', {
+        playlist: publicPlaylist,
+        currentTrackIndex: updatedRoom ? updatedRoom.currentTrackIndex : 0,
+        isShuffle: updatedRoom ? updatedRoom.isShuffle : false
       });
 
       // Broadcast updated device list (audioReady reset to false)
@@ -108,11 +118,11 @@ export function registerAudioRoutes(app, roomManager, io) {
 
       return res.status(200).json({
         success: true,
-        songId: audioData.songId,
-        name: audioData.name,
-        audioUrl: audioData.audioUrl
+        tracks: publicPlaylist,
+        selectedAudio: currentTrack
       });
     });
+  });
   });
 
   // 2. GET /audio/:songId (Speaker HTTP File Download)

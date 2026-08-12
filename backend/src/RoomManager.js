@@ -48,6 +48,10 @@ export class RoomManager {
       lastPlaybackPosition: 0,
       lastCommandTimestamp: null,
       selectedAudio: null,
+      playlist: [],
+      unplayedIndices: [],
+      currentTrackIndex: 0,
+      isShuffle: false,
       devices: new Map([[hostSocketId, hostDevice]])
     };
 
@@ -280,6 +284,104 @@ export class RoomManager {
   }
 
   /**
+   * Sets/appends tracks to room playlist and initializes Fisher-Yates unplayed indices pool.
+   */
+  setRoomPlaylist(roomCode, newTracks = []) {
+    if (!roomCode) return null;
+    const code = String(roomCode).trim().toUpperCase();
+    const room = this.rooms.get(code);
+    if (!room) return null;
+
+    if (!Array.isArray(newTracks) || newTracks.length === 0) return room;
+
+    room.playlist = newTracks;
+    room.currentTrackIndex = 0;
+    room.selectedAudio = newTracks[0];
+
+    // Reset Fisher-Yates unplayed indices pool
+    room.unplayedIndices = newTracks.map((_, idx) => idx).filter(idx => idx !== 0);
+
+    // Reset audioReady state for devices
+    for (const dev of room.devices.values()) {
+      dev.audioReady = false;
+    }
+
+    return room;
+  }
+
+  /**
+   * Returns next track from room playlist (supports Non-Repeating Shuffle & Sequential Endless Loop).
+   */
+  getNextTrack(roomCode) {
+    if (!roomCode) return null;
+    const code = String(roomCode).trim().toUpperCase();
+    const room = this.rooms.get(code);
+    if (!room || !room.playlist || room.playlist.length === 0) return null;
+
+    if (room.playlist.length === 1) {
+      return {
+        track: room.playlist[0],
+        currentTrackIndex: 0,
+        playlist: room.playlist
+      };
+    }
+
+    let nextIndex = 0;
+    if (room.isShuffle) {
+      // Fisher-Yates Non-Repeating Shuffle Pool Algorithm
+      if (!room.unplayedIndices || room.unplayedIndices.length === 0) {
+        // All songs in playlist have played! Reset pool excluding current track
+        room.unplayedIndices = room.playlist
+          .map((_, idx) => idx)
+          .filter(idx => idx !== room.currentTrackIndex);
+      }
+
+      // Pick a random index exclusively from the unplayed pool
+      const randomPoolIdx = Math.floor(Math.random() * room.unplayedIndices.length);
+      nextIndex = room.unplayedIndices[randomPoolIdx];
+      // Remove selected track from unplayed pool
+      room.unplayedIndices.splice(randomPoolIdx, 1);
+    } else {
+      // Sequential Loop Order (0 -> 1 -> 2 -> 0)
+      nextIndex = (room.currentTrackIndex + 1) % room.playlist.length;
+    }
+
+    room.currentTrackIndex = nextIndex;
+    room.selectedAudio = room.playlist[nextIndex];
+
+    // Reset audioReady state for devices
+    for (const dev of room.devices.values()) {
+      dev.audioReady = false;
+    }
+
+    return {
+      track: room.selectedAudio,
+      currentTrackIndex: nextIndex,
+      playlist: room.playlist
+    };
+  }
+
+  /**
+   * Toggles or sets Shuffle mode for room playlist.
+   */
+  setShuffleMode(roomCode, isShuffle) {
+    if (!roomCode) return null;
+    const code = String(roomCode).trim().toUpperCase();
+    const room = this.rooms.get(code);
+    if (!room) return null;
+
+    room.isShuffle = Boolean(isShuffle);
+    // Reset unplayed indices pool excluding current track
+    if (room.playlist && room.playlist.length > 0) {
+      room.unplayedIndices = room.playlist
+        .map((_, idx) => idx)
+        .filter(idx => idx !== room.currentTrackIndex);
+    }
+
+    return room;
+  }
+
+  /**
    * Returns formatted JSON-serializable room object.
    */
   serializeRoom(roomCode) {
@@ -293,6 +395,11 @@ export class RoomManager {
       selectedAudioPublic = publicAudio;
     }
 
+    const publicPlaylist = (room.playlist || []).map(t => {
+      const { filePath, ...pub } = t;
+      return pub;
+    });
+
     return {
       roomCode: room.roomCode,
       hostId: room.hostId,
@@ -301,6 +408,9 @@ export class RoomManager {
       lastPlaybackPosition: room.lastPlaybackPosition,
       lastCommandTimestamp: room.lastCommandTimestamp,
       selectedAudio: selectedAudioPublic,
+      playlist: publicPlaylist,
+      currentTrackIndex: room.currentTrackIndex || 0,
+      isShuffle: Boolean(room.isShuffle),
       devices: Array.from(room.devices.values())
     };
   }

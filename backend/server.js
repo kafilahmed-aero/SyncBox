@@ -198,6 +198,65 @@ io.on('connection', (socket) => {
   socket.on('CMD_STOP', (data, cb) => handlePlaybackCommand('STOP', socket, data, cb));
   socket.on('CMD_SEEK', (data, cb) => handlePlaybackCommand('SEEK', socket, data, cb));
 
+  // 6.1 NEXT_TRACK Handler
+  socket.on('NEXT_TRACK', (data = {}, callback) => {
+    const { roomCode } = data;
+    const room = roomManager.getRoom(roomCode);
+    if (!room) return;
+
+    if (socket.id !== room.hostId) {
+      if (typeof callback === 'function') callback({ success: false, error: 'Only Host can switch tracks.' });
+      return;
+    }
+
+    const nextData = roomManager.getNextTrack(roomCode);
+    if (nextData && nextData.track) {
+      const { filePath, ...publicAudio } = nextData.track;
+      io.to(roomCode).emit('SONG_SELECTED', publicAudio);
+
+      const publicPlaylist = (nextData.playlist || []).map(t => {
+        const { filePath, ...pub } = t;
+        return pub;
+      });
+
+      io.to(roomCode).emit('PLAYLIST_UPDATE', {
+        playlist: publicPlaylist,
+        currentTrackIndex: nextData.currentTrackIndex,
+        isShuffle: room.isShuffle
+      });
+
+      if (typeof callback === 'function') callback({ success: true, track: publicAudio });
+    }
+  });
+
+  // 6.2 TOGGLE_SHUFFLE Handler
+  socket.on('TOGGLE_SHUFFLE', (data = {}, callback) => {
+    const { roomCode, isShuffle } = data;
+    const room = roomManager.getRoom(roomCode);
+    if (!room) return;
+
+    if (socket.id !== room.hostId) {
+      if (typeof callback === 'function') callback({ success: false, error: 'Only Host can toggle shuffle.' });
+      return;
+    }
+
+    const updatedRoom = roomManager.setShuffleMode(roomCode, isShuffle);
+    if (updatedRoom) {
+      const publicPlaylist = (updatedRoom.playlist || []).map(t => {
+        const { filePath, ...pub } = t;
+        return pub;
+      });
+
+      io.to(roomCode).emit('PLAYLIST_UPDATE', {
+        playlist: publicPlaylist,
+        currentTrackIndex: updatedRoom.currentTrackIndex,
+        isShuffle: updatedRoom.isShuffle
+      });
+
+      if (typeof callback === 'function') callback({ success: true, isShuffle: updatedRoom.isShuffle });
+    }
+  });
+
   // 7. DISCONNECT WITH 30-SECOND GRACE PERIOD FOR MOBILE SCREEN-OFF / BACKGROUNDING
   socket.on('disconnect', (reason) => {
     console.log(`[SyncBox Backend] Client disconnected: ${socket.id} (Reason: ${reason})`);

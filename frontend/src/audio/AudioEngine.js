@@ -185,6 +185,35 @@ class AudioEngine {
   }
 
   /**
+   * Requests Web Screen Wake Lock API to prevent Laptop/Mobile OS from sleeping during playback.
+   */
+  async requestWakeLock() {
+    if (typeof navigator !== 'undefined' && 'wakeLock' in navigator) {
+      try {
+        if (!this.wakeLockSentinel) {
+          this.wakeLockSentinel = await navigator.wakeLock.request('screen');
+          console.log('[AudioEngine] Screen Wake Lock acquired.');
+          this.wakeLockSentinel.addEventListener('release', () => {
+            console.log('[AudioEngine] Screen Wake Lock released.');
+            this.wakeLockSentinel = null;
+          });
+        }
+      } catch (e) {
+        console.warn('[AudioEngine] Screen Wake Lock warning:', e.message);
+      }
+    }
+  }
+
+  releaseWakeLock() {
+    if (this.wakeLockSentinel) {
+      try {
+        this.wakeLockSentinel.release();
+      } catch (e) {}
+      this.wakeLockSentinel = null;
+    }
+  }
+
+  /**
    * Safely stops and disconnects the active AudioBufferSourceNode without triggering natural completion logic.
    */
   stopActiveSourceOnly() {

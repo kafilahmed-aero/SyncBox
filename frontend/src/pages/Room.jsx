@@ -4,6 +4,7 @@ import DeviceItem from '../components/DeviceItem';
 import SyncStatus from '../components/SyncStatus';
 import PlayerControls from '../components/PlayerControls';
 import SpeakerActivation from '../components/SpeakerActivation';
+import Playlist from '../components/Playlist';
 import { audioEngine } from '../audio/AudioEngine';
 import { clockSync } from '../audio/ClockSync';
 import { socket } from '../socket';
@@ -15,6 +16,11 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
   const [speakerReady, setSpeakerReady] = useState(() => audioEngine.isReady());
   const [isActivating, setIsActivating] = useState(false);
   const [audioError, setAudioError] = useState(null);
+
+  // Playlist Queue & Non-Repeating Shuffle State
+  const [playlist, setPlaylist] = useState([]);
+  const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
+  const [isShuffle, setIsShuffle] = useState(false);
 
   // Per-Device Physical Audio Calibration Offset State & Debug Touch Log
   const [userOffset, setUserOffset] = useState(() => audioEngine.getUserOffset());
@@ -149,10 +155,27 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
     }
 
     audioEngine.setOnEndedCallback(() => {
-      setPlaybackState('STOPPED');
-      setCurrentTime(0);
-      setSyncState('READY');
-      setDriftStats({ driftMs: 0, playbackRate: 1.0 });
+      console.log('[Room Track End] Current track ended.');
+      if (isHost) {
+        console.log('[Room Host Auto-Advance] Requesting NEXT_TRACK from room playlist...');
+        socket.emit('NEXT_TRACK', { roomCode }, (res) => {
+          if (res && res.success && res.track) {
+            setTimeout(() => {
+              socket.emit('CMD_PLAY', { roomCode, position: 0 });
+            }, 300);
+          } else {
+            setPlaybackState('STOPPED');
+            setCurrentTime(0);
+            setSyncState('READY');
+            setDriftStats({ driftMs: 0, playbackRate: 1.0 });
+          }
+        });
+      } else {
+        setPlaybackState('STOPPED');
+        setCurrentTime(0);
+        setSyncState('READY');
+        setDriftStats({ driftMs: 0, playbackRate: 1.0 });
+      }
     });
 
     // Listen for Real-Time Backend Device List Updates
@@ -161,6 +184,17 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
         setDevices(data.devices);
       }
     };
+
+    // Listen for Playlist Updates
+    const handlePlaylistUpdate = (data) => {
+      if (data) {
+        if (data.playlist) setPlaylist(data.playlist);
+        if (typeof data.currentTrackIndex === 'number') setCurrentTrackIndex(data.currentTrackIndex);
+        if (typeof data.isShuffle === 'boolean') setIsShuffle(data.isShuffle);
+      }
+    };
+
+    socket.on('PLAYLIST_UPDATE', handlePlaylistUpdate);
 
   // Listen for Room PLAYBACK_COMMAND Broadcast (Synchronized Initial Start & Playback Commands)
   const handlePlaybackCommand = async (payload) => {
@@ -451,27 +485,26 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
     }
   };
 
-  // Handle Local Audio File Selection, Local Decoding, & HTTP Backend Upload
+  // Handle Local Audio File Selection (Multi-File Batch Upload Support)
   const handleFileChange = async (e) => {
-    const files = e.target.files;
+    const files = Array.from(e.target.files || []);
     if (!files || files.length === 0) return;
 
-    const selectedFile = files[0];
     setFileError(null);
     setSongPrepState('SONG SELECTED');
 
     try {
       setSongPrepState('PREPARING');
       
-      // 1. Local Web Audio Decoding
-      const meta = await audioEngine.loadAndDecodeAudioFile(selectedFile);
+      // 1. Local Web Audio Decoding for first track
+      const meta = await audioEngine.loadAndDecodeAudioFile(files[0]);
       setSongMetadata(meta);
       setPlaybackState('STOPPED');
       setCurrentTime(0);
 
-      // 2. Upload File to Backend Server
+      // 2. Build FormData for all selected batch files
       const formData = new FormData();
-      formData.append('audio', selectedFile);
+      files.forEach(f => formData.append('audio', f));
       formData.append('roomCode', roomCode);
       formData.append('duration', meta.duration);
 
@@ -485,18 +518,32 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
         throw new Error(uploadJson.error || 'Server upload failed');
       }
 
+      if (uploadJson.tracks) {
+        setPlaylist(uploadJson.tracks);
+      }
+
       setSongPrepState('READY');
       setSpeakerReady(true);
       if (socket.connected) {
         socket.emit('AUDIO_READY', { roomCode });
       }
-      console.log('[Room] Host audio uploaded and broadcast via backend server.');
+      console.log(`[Room] Host uploaded ${files.length} tracks to room playlist.`);
     } catch (err) {
       console.error('[SyncBox Room] File decode/upload error:', err);
-      setFileError('Unable to process audio file. Please select a valid MP3, WAV, or OGG file.');
+      setFileError('Unable to process audio files. Please select valid MP3, WAV, or OGG files.');
       setSongPrepState('NO SONG');
       setSongMetadata(null);
     }
+  };
+
+  const handleToggleShuffle = () => {
+    if (!isHost) return;
+    socket.emit('TOGGLE_SHUFFLE', { roomCode, isShuffle: !isShuffle });
+  };
+
+  const handleSelectPlaylistTrack = (index) => {
+    if (!isHost) return;
+    socket.emit('NEXT_TRACK', { roomCode });
   };
 
   // Synchronized Host Playback Controls emitting Socket Events
@@ -534,13 +581,14 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
   return (
     <div className="content-wrapper">
       <Card>
-        {/* Hidden HTML File Input for Host */}
+        {/* Hidden HTML File Input for Host (Multi-File Batch Selection Support) */}
         {isHost && (
           <input 
             type="file"
             ref={fileInputRef}
             onChange={handleFileChange}
             accept="audio/*"
+            multiple
             style={{ display: 'none' }}
             id="hidden-file-input"
           />
@@ -757,6 +805,16 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
               />
             </div>
 
+            {/* Playlist Queue Section */}
+            <Playlist 
+              playlist={playlist}
+              currentTrackIndex={currentTrackIndex}
+              isShuffle={isShuffle}
+              isHost={true}
+              onToggleShuffle={handleToggleShuffle}
+              onSelectTrack={handleSelectPlaylistTrack}
+            />
+
             {/* Synchronization Status */}
             <div className="form-group">
               <span className="form-label">Synchronization Status</span>
@@ -803,6 +861,14 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
                 </div>
               </div>
             </div>
+
+            {/* Speaker Playlist View */}
+            <Playlist 
+              playlist={playlist}
+              currentTrackIndex={currentTrackIndex}
+              isShuffle={isShuffle}
+              isHost={false}
+            />
 
             {/* Synchronization Status */}
             <div className="form-group">
