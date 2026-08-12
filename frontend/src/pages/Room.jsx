@@ -445,13 +445,22 @@ export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }
                 {isHost ? 'HOST VIEW' : 'SPEAKER VIEW'}
               </span>
             </div>
-            {/* Diagnostics Badge */}
+            {/* Extended Diagnostics Badge */}
             <div style={{ marginTop: '0.4rem', display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
               <span className="badge badge-status-default" style={{ fontSize: '0.65rem', textTransform: 'none' }}>
                 🕒 Clock: {clockStats.isSynced ? `Offset ${clockStats.offset >= 0 ? '+' : ''}${clockStats.offset.toFixed(1)}ms • RTT ${clockStats.rtt.toFixed(1)}ms` : 'Syncing...'}
               </span>
               <span className="badge badge-status-default" style={{ fontSize: '0.65rem', textTransform: 'none' }}>
-                Drift: {driftStats.status === 'Resyncing...' ? 'Resyncing...' : `${driftStats.driftMs >= 0 ? '+' : ''}${driftStats.driftMs.toFixed(0)}ms • Rate ${driftStats.playbackRate.toFixed(3)}x • OutLatency ${(audioEngine.getOutputLatency() * 1000).toFixed(0)}ms`}
+                Drift: {driftStats.status === 'Resyncing...' ? 'Resyncing...' : `${driftStats.driftMs >= 0 ? '+' : ''}${driftStats.driftMs.toFixed(0)}ms • Rate ${driftStats.playbackRate.toFixed(3)}x`}
+              </span>
+              <span className="badge badge-status-default" style={{ fontSize: '0.65rem', textTransform: 'none' }}>
+                {(() => {
+                  const details = audioEngine.getOutputLatencyDetails();
+                  const base = details.baseSupported ? `${(details.baseLatencySec * 1000).toFixed(0)}ms` : 'unsupported';
+                  const out = details.outputSupported ? `${(details.outputLatencySec * 1000).toFixed(0)}ms` : 'unsupported';
+                  const ts = details.timestampSupported ? 'supported' : 'unsupported';
+                  return `BaseLat: ${base} • OutLat: ${out} • Timestamp: ${ts}`;
+                })()}
               </span>
             </div>
           </div>

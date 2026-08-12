@@ -133,14 +133,55 @@ class AudioEngine {
   }
 
   /**
+   * Safe feature-detection for Web Audio API hardware output timing properties.
+   */
+  getOutputLatencyDetails() {
+    if (!this.audioCtx) {
+      return {
+        baseLatencySec: 0,
+        outputLatencySec: 0,
+        totalLatencySec: 0,
+        baseSupported: false,
+        outputSupported: false,
+        timestampSupported: false,
+        outputTimestamp: null
+      };
+    }
+
+    const baseSupported = typeof this.audioCtx.baseLatency === 'number';
+    const outputSupported = typeof this.audioCtx.outputLatency === 'number';
+    const timestampSupported = typeof this.audioCtx.getOutputTimestamp === 'function';
+
+    const baseLatencySec = baseSupported ? Number(this.audioCtx.baseLatency) || 0 : 0;
+    const outputLatencySec = outputSupported ? Number(this.audioCtx.outputLatency) || 0 : 0;
+    const totalLatencySec = baseLatencySec + outputLatencySec;
+
+    let outputTimestamp = null;
+    if (timestampSupported) {
+      try {
+        outputTimestamp = this.audioCtx.getOutputTimestamp();
+      } catch (err) {
+        outputTimestamp = null;
+      }
+    }
+
+    return {
+      baseLatencySec,
+      outputLatencySec,
+      totalLatencySec,
+      baseSupported,
+      outputSupported,
+      timestampSupported,
+      outputTimestamp
+    };
+  }
+
+  /**
    * Returns total hardware audio output latency in seconds (baseLatency + outputLatency)
    * using safe feature detection across desktop and mobile browsers.
    */
   getOutputLatency() {
-    if (!this.audioCtx) return 0;
-    const base = Number(this.audioCtx.baseLatency) || 0;
-    const output = Number(this.audioCtx.outputLatency) || 0;
-    return base + output;
+    return this.getOutputLatencyDetails().totalLatencySec;
   }
 
   /**
