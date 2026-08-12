@@ -64,9 +64,18 @@ io.on('connection', (socket) => {
     });
   });
 
+  const disconnectGraceTimers = new Map();
+
   // 2. JOIN_ROOM
   socket.on('JOIN_ROOM', (data = {}, callback) => {
     const { roomCode, deviceName } = data;
+
+    // Cancel pending disconnect grace timer if reconnecting
+    if (disconnectGraceTimers.has(socket.id)) {
+      clearTimeout(disconnectGraceTimers.get(socket.id));
+      disconnectGraceTimers.delete(socket.id);
+    }
+
     const result = roomManager.joinRoom(roomCode, socket.id, deviceName || 'Phone');
 
     if (result.success) {
@@ -189,21 +198,30 @@ io.on('connection', (socket) => {
   socket.on('CMD_STOP', (data, cb) => handlePlaybackCommand('STOP', socket, data, cb));
   socket.on('CMD_SEEK', (data, cb) => handlePlaybackCommand('SEEK', socket, data, cb));
 
-  // 7. DISCONNECT
+  // 7. DISCONNECT WITH 30-SECOND GRACE PERIOD FOR MOBILE SCREEN-OFF / BACKGROUNDING
   socket.on('disconnect', (reason) => {
     console.log(`[SyncBox Backend] Client disconnected: ${socket.id} (Reason: ${reason})`);
     
-    const result = roomManager.leaveRoom(socket.id);
-    if (result) {
-      if (!result.roomDeleted) {
-        io.to(result.roomCode).emit('DEVICE_UPDATE', {
-          roomCode: result.roomCode,
-          devices: result.devices
-        });
-      } else {
-        console.log(`[SyncBox Backend] Room ${result.roomCode} deleted (empty on disconnect)`);
+    const roomCode = roomManager.getRoomBySocket(socket.id);
+    if (!roomCode) return;
+
+    // Set 30-second grace timer before removing device
+    const graceTimer = setTimeout(() => {
+      disconnectGraceTimers.delete(socket.id);
+      const result = roomManager.leaveRoom(socket.id);
+      if (result) {
+        if (!result.roomDeleted) {
+          io.to(result.roomCode).emit('DEVICE_UPDATE', {
+            roomCode: result.roomCode,
+            devices: result.devices
+          });
+        } else {
+          console.log(`[SyncBox Backend] Room ${result.roomCode} deleted after grace period`);
+        }
       }
-    }
+    }, 30000);
+
+    disconnectGraceTimers.set(socket.id, graceTimer);
   });
 });
 

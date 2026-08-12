@@ -230,12 +230,31 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
       }
     };
 
+    // Socket Reconnection Handler (Auto-Rejoin Room Channel)
+    const handleConnect = () => {
+      console.log(`[Room Socket] Reconnected with ID: ${socket.id}. Auto-rejoining room: ${roomCode}`);
+      socket.emit('JOIN_ROOM', { roomCode, deviceName: isHost ? 'Laptop' : 'Phone' }, (res) => {
+        if (res && res.success) {
+          if (speakerReady && songPrepState === 'READY') {
+            socket.emit('AUDIO_READY', { roomCode });
+          }
+          socket.emit('GET_ROOM_STATE', { roomCode }, (stateRes) => {
+            if (stateRes && stateRes.success && stateRes.room) {
+              reconcileRoomState(stateRes.room);
+            }
+          });
+        }
+      });
+    };
+
+    socket.on('connect', handleConnect);
     socket.on('DEVICE_UPDATE', handleDeviceUpdate);
     socket.on('SONG_SELECTED', processSongSelection);
     socket.on('PLAYBACK_COMMAND', handlePlaybackCommand);
 
     return () => {
       clockSync.stopAutoSync();
+      socket.off('connect', handleConnect);
       socket.off('DEVICE_UPDATE', handleDeviceUpdate);
       socket.off('SONG_SELECTED', processSongSelection);
       socket.off('PLAYBACK_COMMAND', handlePlaybackCommand);
@@ -243,18 +262,15 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
         cancelAnimationFrame(animFrameRef.current);
       }
     };
-  }, [roomCode, isHost]);
-
-  // Preloaded Room Song Auto-Sync on Join & Mount
+  }, [roomCode, isHost, speakerReady, songPrepState]);
   useEffect(() => {
     if (initialRoomData && initialRoomData.selectedAudio && songPrepState === 'NO SONG') {
       console.log('[Room Auto-Sync] Preloaded song detected from initialRoomData:', initialRoomData.selectedAudio);
       processSongSelection(initialRoomData.selectedAudio);
     } else if (songPrepState === 'NO SONG') {
       socket.emit('GET_ROOM_STATE', { roomCode }, (res) => {
-        if (res && res.success && res.room && res.room.selectedAudio) {
-          console.log('[Room Auto-Sync] Preloaded song fetched via GET_ROOM_STATE:', res.room.selectedAudio);
-          processSongSelection(res.room.selectedAudio);
+        if (res && res.success && res.room) {
+          reconcileRoomState(res.room);
         }
       });
     }
@@ -275,13 +291,16 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
           }
         } catch (e) {}
 
-        if (speakerReady && songPrepState === 'READY') {
-          socket.emit('AUDIO_READY', { roomCode });
-        }
-
-        socket.emit('GET_ROOM_STATE', { roomCode }, (res) => {
-          if (res && res.success && res.room && res.room.selectedAudio && songPrepState === 'NO SONG') {
-            processSongSelection(res.room.selectedAudio);
+        socket.emit('JOIN_ROOM', { roomCode, deviceName: isHost ? 'Laptop' : 'Phone' }, (res) => {
+          if (res && res.success) {
+            if (speakerReady && songPrepState === 'READY') {
+              socket.emit('AUDIO_READY', { roomCode });
+            }
+            socket.emit('GET_ROOM_STATE', { roomCode }, (stateRes) => {
+              if (stateRes && stateRes.success && stateRes.room) {
+                reconcileRoomState(stateRes.room);
+              }
+            });
           }
         });
       }
@@ -296,7 +315,7 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
       window.removeEventListener('pageshow', handleLifecycleRecovery);
       window.removeEventListener('focus', handleLifecycleRecovery);
     };
-  }, [roomCode, speakerReady, songPrepState]);
+  }, [roomCode, isHost, speakerReady, songPrepState]);
 
   // Continuous Real-Time Synchronization Loop (500ms interval)
   useEffect(() => {

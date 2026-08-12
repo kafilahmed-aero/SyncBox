@@ -62,7 +62,8 @@ export class RoomManager {
   }
 
   /**
-   * Adds a new speaker device to an existing room.
+   * Adds or re-binds a speaker/host device to an existing room.
+   * Supports idempotent socket ID updates upon reconnection.
    */
   joinRoom(roomCode, socketId, deviceName = 'Phone') {
     if (!roomCode) {
@@ -75,16 +76,41 @@ export class RoomManager {
     }
 
     const room = this.rooms.get(code);
-    const speakerDevice = {
+    const requestedName = deviceName || 'Phone';
+
+    // Check if a device with the same deviceName already exists in room
+    let existingOldSocketId = null;
+    let existingRole = 'SPEAKER';
+    let existingAudioReady = false;
+
+    for (const [oldSockId, dev] of room.devices.entries()) {
+      if (dev.deviceName === requestedName || (requestedName === 'Laptop' && dev.role === 'HOST')) {
+        existingOldSocketId = oldSockId;
+        existingRole = dev.role;
+        existingAudioReady = dev.audioReady;
+        break;
+      }
+    }
+
+    // Clean up stale old socket mapping if rejoining
+    if (existingOldSocketId) {
+      room.devices.delete(existingOldSocketId);
+      this.socketToRoom.delete(existingOldSocketId);
+      if (existingRole === 'HOST' || room.hostId === existingOldSocketId) {
+        room.hostId = socketId;
+      }
+    }
+
+    const device = {
       deviceId: socketId,
       socketId: socketId,
-      deviceName: deviceName || 'Phone',
-      role: 'SPEAKER',
+      deviceName: requestedName,
+      role: existingRole,
       status: 'CONNECTED',
-      audioReady: false
+      audioReady: existingAudioReady
     };
 
-    room.devices.set(socketId, speakerDevice);
+    room.devices.set(socketId, device);
     this.socketToRoom.set(socketId, code);
 
     return {
