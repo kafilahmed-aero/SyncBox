@@ -38,6 +38,7 @@ export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }
 
   // Refs for tracking timeline command timestamps
   const lastCommandRef = useRef({ position: 0, serverTime: Date.now() });
+  const isResyncingRef = useRef(false);
   const fileInputRef = useRef(null);
   const animFrameRef = useRef(null);
 
@@ -186,32 +187,41 @@ export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }
     };
   }, [roomCode, isHost]);
 
-  // Phase 7 Client-Centric Drift Detection & Correction Loop (3000ms interval)
+  // Phase 7.1 Continuous Real-Time Synchronization Loop (500ms interval)
   useEffect(() => {
     if (playbackState !== 'PLAYING' || songPrepState !== 'READY') {
       audioEngine.setPlaybackRate(1.000);
-      setDriftStats({ driftMs: 0, playbackRate: 1.0 });
+      setDriftStats({ driftMs: 0, playbackRate: 1.0, status: 'Stopped' });
+      isResyncingRef.current = false;
       return;
     }
 
     const checkDrift = async () => {
       if (audioEngine.getPlaybackState() !== 'PLAYING') return;
 
-      const serverNow = clockSync.getServerTime();
-      const lastPos = lastCommandRef.current.position;
-      const lastTime = lastCommandRef.current.serverTime;
+      // Ignore drift check if hard resync is currently in progress
+      if (isResyncingRef.current) return;
 
-      // Do not evaluate drift if playback has not yet reached scheduled timeline origin (lead time)
-      if (serverNow < lastTime) {
+      const serverNow = clockSync.getServerTime();
+      const playStartPosition = lastCommandRef.current.position;
+      const playStartServerTime = lastCommandRef.current.serverTime;
+
+      // 1. Do not evaluate drift during lead time window before scheduled start
+      if (serverNow < playStartServerTime) {
         return;
       }
 
-      // Calculate Expected Server Reference Position
-      const elapsedSeconds = Math.max(0, (serverNow - lastTime) / 1000);
       const totalDuration = audioEngine.getDuration();
-      const expectedPosition = Math.min(lastPos + elapsedSeconds, totalDuration);
+      const elapsedSeconds = Math.max(0, (serverNow - playStartServerTime) / 1000);
+      const expectedPosition = Math.min(playStartPosition + elapsedSeconds, totalDuration);
 
-      // Calculate Client Position & Drift (ms)
+      // 2. End-of-song handling: stop drift correction past buffer duration
+      if (expectedPosition >= totalDuration) {
+        audioEngine.setPlaybackRate(1.000);
+        return;
+      }
+
+      // 3. Calculate Client Position & Drift (ms)
       const clientPosition = audioEngine.getCurrentPosition();
       const driftMs = (clientPosition - expectedPosition) * 1000;
       const absDrift = Math.abs(driftMs);
@@ -219,11 +229,12 @@ export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }
       let currentRate = audioEngine.getPlaybackRate();
 
       if (absDrift <= 20) {
-        // IN SYNC: drift <= 20ms
+        // IN SYNC: |drift| <= 20ms
         audioEngine.setPlaybackRate(1.000);
         currentRate = 1.000;
+        setDriftStats({ driftMs, playbackRate: 1.000, status: 'Synced' });
       } else if (absDrift <= 200) {
-        // SOFT CORRECTION: 20ms < |drift| <= 200ms
+        // SMALL/MEDIUM DRIFT: 20ms < |drift| <= 200ms
         if (driftMs > 0) {
           // Client ahead -> slow down to 0.995
           audioEngine.setPlaybackRate(0.995);
@@ -234,38 +245,41 @@ export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }
           currentRate = 1.005;
         }
 
-        // Return to 1.000 once within 10ms
+        // Restore 1.000 once within <= 10ms
         if (absDrift <= 10) {
           audioEngine.setPlaybackRate(1.000);
           currentRate = 1.000;
         }
+
+        setDriftStats({ driftMs, playbackRate: currentRate, status: 'Soft Correcting' });
       } else {
-        // HARD RESYNC: |drift| > 200ms
-        console.warn(`[Phase 7 Drift] Large drift detected (${driftMs.toFixed(1)}ms). Triggering hard resync...`);
-        audioEngine.setPlaybackRate(1.000);
-        currentRate = 1.000;
+        // LARGE DRIFT: |drift| > 200ms -> HARD RESYNC to FUTURE Server Timestamp
+        console.warn(`[Phase 7.1 Sync] Large drift detected (${driftMs.toFixed(1)}ms). Scheduling future hard resync...`);
+        isResyncingRef.current = true;
+        setDriftStats({ driftMs, playbackRate: 1.000, status: 'Resyncing...' });
 
-        const leadTime = 1000;
-        const playAtTimestamp = serverNow + leadTime;
-        const targetPos = Math.min(expectedPosition + (leadTime / 1000), totalDuration);
+        // Schedule future server timestamp (+500ms)
+        const resyncServerTime = serverNow + 500;
+        const resyncPosition = Math.min(
+          playStartPosition + (resyncServerTime - playStartServerTime) / 1000,
+          totalDuration
+        );
+
         const ctx = audioEngine.getAudioContext();
-        const targetAudioCtxTime = clockSync.toAudioContextTime(playAtTimestamp, ctx);
+        const targetAudioCtxTime = clockSync.toAudioContextTime(resyncServerTime, ctx);
 
-        await audioEngine.playScheduled(targetAudioCtxTime, targetPos);
-        lastCommandRef.current = {
-          position: targetPos,
-          serverTime: playAtTimestamp
-        };
+        audioEngine.setPlaybackRate(1.000);
+        await audioEngine.playScheduled(targetAudioCtxTime, resyncPosition);
+
+        // Reset resyncing protection flag once target time has passed
+        setTimeout(() => {
+          isResyncingRef.current = false;
+        }, 600);
       }
-
-      setDriftStats({
-        driftMs: driftMs,
-        playbackRate: currentRate
-      });
     };
 
-    // Run initial check and schedule 3000ms loop
-    const driftInterval = setInterval(checkDrift, 3000);
+    // Run continuous 500ms monitoring loop
+    const driftInterval = setInterval(checkDrift, 500);
 
     return () => {
       clearInterval(driftInterval);
@@ -436,7 +450,7 @@ export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }
                 🕒 Clock Sync: {clockStats.isSynced ? `Offset ${clockStats.offset >= 0 ? '+' : ''}${clockStats.offset.toFixed(1)}ms • RTT ${clockStats.rtt.toFixed(1)}ms` : 'Syncing...'}
               </span>
               <span className="badge badge-status-default" style={{ fontSize: '0.65rem', textTransform: 'none' }}>
-                Drift: {driftStats.driftMs >= 0 ? '+' : ''}{driftStats.driftMs.toFixed(0)}ms • Rate {driftStats.playbackRate.toFixed(3)}x
+                Drift: {driftStats.status === 'Resyncing...' ? 'Resyncing...' : `${driftStats.driftMs >= 0 ? '+' : ''}${driftStats.driftMs.toFixed(0)}ms • Rate ${driftStats.playbackRate.toFixed(3)}x`}
               </span>
             </div>
           </div>
