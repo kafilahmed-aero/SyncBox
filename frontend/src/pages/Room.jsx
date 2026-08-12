@@ -611,160 +611,179 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
           />
         )}
 
-        {/* Room Header & Clock/Drift Diagnostics */}
-        <div className="room-header">
-          <div className="room-title-group">
-            <span className="form-label">ROOM CODE</span>
-            <div>
+        {/* Room Top Header Bar with Room Code & Styled Red Leave Room Button Box */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: '0.8rem',
+          flexWrap: 'wrap',
+          marginBottom: '1rem',
+          paddingBottom: '0.8rem',
+          borderBottom: '1px solid #334155'
+        }}>
+          <div>
+            <span className="form-label" style={{ display: 'block', marginBottom: '0.2rem' }}>ROOM CODE</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <span className="room-code-badge">{roomCode}</span>
               <span className={`badge ${isHost ? 'badge-host' : 'badge-speaker'} role-badge-header`}>
                 {isHost ? 'HOST VIEW' : 'SPEAKER VIEW'}
               </span>
             </div>
-            {/* Extended Diagnostics & Per-Device Calibration Controls */}
-            <div style={{ marginTop: '0.4rem', display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-              <span className="badge badge-status-default" style={{ fontSize: '0.65rem', textTransform: 'none' }}>
-                🕒 Clock: {clockStats.isSynced ? `Offset ${clockStats.offset >= 0 ? '+' : ''}${clockStats.offset.toFixed(1)}ms • RTT ${clockStats.rtt.toFixed(1)}ms` : 'Syncing...'}
-              </span>
-              <span className="badge badge-status-default" style={{ fontSize: '0.65rem', textTransform: 'none' }}>
-                Drift: {driftStats.driftMs >= 0 ? '+' : ''}${driftStats.driftMs.toFixed(0)}ms • Rate ${driftStats.playbackRate.toFixed(3)}x
-              </span>
-              <span className="badge badge-status-default" style={{ fontSize: '0.65rem', textTransform: 'none' }}>
-                {(() => {
-                  const details = audioEngine.getOutputLatencyDetails();
-                  const base = details.baseSupported ? `${(details.baseLatencySec * 1000).toFixed(0)}ms` : 'unsupported';
-                  const out = details.outputSupported ? `${(details.outputLatencySec * 1000).toFixed(0)}ms` : 'unsupported';
-                  const ts = details.timestampSupported ? 'supported' : 'unsupported';
-                  return `BaseLat: ${base} • OutLat: ${out} • Timestamp: ${ts}`;
-                })()}
-              </span>
-            </div>
-
-            {/* Speaker Interactive Physical Offset Calibration Bar */}
-            {!isHost && (
-              <div style={{
-                marginTop: '0.8rem',
-                padding: '0.8rem 1rem',
-                background: 'linear-gradient(135deg, rgba(30,41,59,0.7), rgba(15,23,42,0.8))',
-                border: '1px solid rgba(148,163,184,0.15)',
-                borderRadius: '12px',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#A7F3D0', letterSpacing: '0.05em' }}>
-                    🎛️ SPEAKER OFFSET CALIBRATION
-                  </span>
-                  <span style={{ fontSize: '0.7rem', color: '#94A3B8' }}>
-                    Step: ±0.05s
-                  </span>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1.2rem' }}>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    style={{
-                      width: '3.8rem',
-                      height: '3.2rem',
-                      fontSize: '1.6rem',
-                      fontWeight: 800,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      borderRadius: '10px',
-                      backgroundColor: '#1E293B',
-                      borderColor: '#334155',
-                      color: '#F8FAFC',
-                      cursor: 'pointer',
-                      touchAction: 'manipulation',
-                      userSelect: 'none',
-                      WebkitUserSelect: 'none'
-                    }}
-                    onTouchStart={(e) => handleAdjustOffset(-0.05, e)}
-                    onClick={(e) => handleAdjustOffset(-0.05, e)}
-                    title="Decrement offset by -0.05s (-50ms)"
-                  >
-                    −
-                  </button>
-
-                  <div style={{ textAlign: 'center', minWidth: '7.5rem' }}>
-                    <div style={{ fontSize: '1.6rem', fontWeight: 800, color: userOffset === 0 ? '#F8FAFC' : '#38BDF8', fontFamily: 'monospace' }}>
-                      {userOffset >= 0 ? `+${userOffset.toFixed(2)}s` : `${userOffset.toFixed(2)}s`}
-                    </div>
-                    <div style={{ fontSize: '0.65rem', color: '#94A3B8', marginTop: '0.1rem' }}>
-                      {userOffset === 0 ? 'Aligned with Host' : userOffset > 0 ? `${(userOffset * 1000).toFixed(0)}ms Delayed` : `${(Math.abs(userOffset) * 1000).toFixed(0)}ms Advanced`}
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    style={{
-                      width: '3.8rem',
-                      height: '3.2rem',
-                      fontSize: '1.6rem',
-                      fontWeight: 800,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      borderRadius: '10px',
-                      backgroundColor: '#1E293B',
-                      borderColor: '#334155',
-                      color: '#F8FAFC',
-                      cursor: 'pointer',
-                      touchAction: 'manipulation',
-                      userSelect: 'none',
-                      WebkitUserSelect: 'none'
-                    }}
-                    onTouchStart={(e) => handleAdjustOffset(+0.05, e)}
-                    onClick={(e) => handleAdjustOffset(+0.05, e)}
-                    title="Increment offset by +0.05s (+50ms)"
-                  >
-                    +
-                  </button>
-                </div>
-
-                {lastTouchLog && (
-                  <div style={{ fontSize: '0.65rem', color: '#10B981', marginTop: '0.4rem', textAlign: 'center', fontWeight: 600 }}>
-                    ✓ {lastTouchLog}
-                  </div>
-                )}
-
-                {userOffset !== 0 && (
-                  <div style={{ textAlign: 'center', marginTop: '0.5rem' }}>
-                    <button
-                      type="button"
-                      style={{ background: 'none', border: 'none', color: '#64748B', fontSize: '0.65rem', cursor: 'pointer', textDecoration: 'underline', touchAction: 'manipulation' }}
-                      onTouchStart={(e) => handleAdjustOffset(0, e)}
-                      onClick={(e) => handleAdjustOffset(0, e)}
-                    >
-                      Reset to 0.00s
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
+
+          {/* Styled Red Box Button for Leaving Room */}
           <button 
             type="button"
-            className="btn btn-secondary" 
-            style={{
-              margin: 0,
-              padding: '0.45rem 0.85rem',
-              fontSize: '0.75rem',
-              fontWeight: 700,
-              backgroundColor: 'rgba(239, 68, 68, 0.15)',
-              borderColor: 'rgba(239, 68, 68, 0.4)',
-              color: '#FCA5A5',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              touchAction: 'manipulation'
-            }}
             onClick={handleLeave}
             id="btn-leave-room"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              padding: '0.5rem 0.95rem',
+              fontSize: '0.8rem',
+              fontWeight: 700,
+              backgroundColor: '#3F1D1D',
+              border: '1.5px solid #EF4444',
+              color: '#FCA5A5',
+              borderRadius: '10px',
+              cursor: 'pointer',
+              touchAction: 'manipulation',
+              boxShadow: '0 2px 8px rgba(239, 68, 68, 0.25)',
+              transition: 'all 0.2s ease',
+              whiteSpace: 'nowrap'
+            }}
           >
-            🚪 Leave Room
+            <span>🚪</span>
+            <span>Leave Room</span>
           </button>
+        </div>
+
+        {/* Extended Diagnostics & Per-Device Calibration Controls */}
+        <div style={{ marginBottom: '1rem' }}>
+          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+            <span className="badge badge-status-default" style={{ fontSize: '0.65rem', textTransform: 'none' }}>
+              🕒 Clock: {clockStats.isSynced ? `Offset ${clockStats.offset >= 0 ? '+' : ''}${clockStats.offset.toFixed(1)}ms • RTT ${clockStats.rtt.toFixed(1)}ms` : 'Syncing...'}
+            </span>
+            <span className="badge badge-status-default" style={{ fontSize: '0.65rem', textTransform: 'none' }}>
+              Drift: {driftStats.driftMs >= 0 ? '+' : ''}${driftStats.driftMs.toFixed(0)}ms • Rate ${driftStats.playbackRate.toFixed(3)}x
+            </span>
+            <span className="badge badge-status-default" style={{ fontSize: '0.65rem', textTransform: 'none' }}>
+              {(() => {
+                const details = audioEngine.getOutputLatencyDetails();
+                const base = details.baseSupported ? `${(details.baseLatencySec * 1000).toFixed(0)}ms` : 'unsupported';
+                const out = details.outputSupported ? `${(details.outputLatencySec * 1000).toFixed(0)}ms` : 'unsupported';
+                const ts = details.timestampSupported ? 'supported' : 'unsupported';
+                return `BaseLat: ${base} • OutLat: ${out} • Timestamp: ${ts}`;
+              })()}
+            </span>
+          </div>
+
+          {/* Speaker Interactive Physical Offset Calibration Bar */}
+          {!isHost && (
+            <div style={{
+              marginTop: '0.8rem',
+              padding: '0.8rem 1rem',
+              background: 'linear-gradient(135deg, rgba(30,41,59,0.7), rgba(15,23,42,0.8))',
+              border: '1px solid rgba(148,163,184,0.15)',
+              borderRadius: '12px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#A7F3D0', letterSpacing: '0.05em' }}>
+                  🎛️ SPEAKER OFFSET CALIBRATION
+                </span>
+                <span style={{ fontSize: '0.7rem', color: '#94A3B8' }}>
+                  Step: ±0.05s
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1.2rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{
+                    width: '3.8rem',
+                    height: '3.2rem',
+                    fontSize: '1.6rem',
+                    fontWeight: 800,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: '10px',
+                    backgroundColor: '#1E293B',
+                    borderColor: '#334155',
+                    color: '#F8FAFC',
+                    cursor: 'pointer',
+                    touchAction: 'manipulation',
+                    userSelect: 'none',
+                    WebkitUserSelect: 'none'
+                  }}
+                  onTouchStart={(e) => handleAdjustOffset(-0.05, e)}
+                  onClick={(e) => handleAdjustOffset(-0.05, e)}
+                  title="Decrement offset by -0.05s (-50ms)"
+                >
+                  −
+                </button>
+
+                <div style={{ textAlign: 'center', minWidth: '7.5rem' }}>
+                  <div style={{ fontSize: '1.6rem', fontWeight: 800, color: userOffset === 0 ? '#F8FAFC' : '#38BDF8', fontFamily: 'monospace' }}>
+                    {userOffset >= 0 ? `+${userOffset.toFixed(2)}s` : `${userOffset.toFixed(2)}s`}
+                  </div>
+                  <div style={{ fontSize: '0.65rem', color: '#94A3B8', marginTop: '0.1rem' }}>
+                    {userOffset === 0 ? 'Aligned with Host' : userOffset > 0 ? `${(userOffset * 1000).toFixed(0)}ms Delayed` : `${(Math.abs(userOffset) * 1000).toFixed(0)}ms Advanced`}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{
+                    width: '3.8rem',
+                    height: '3.2rem',
+                    fontSize: '1.6rem',
+                    fontWeight: 800,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: '10px',
+                    backgroundColor: '#1E293B',
+                    borderColor: '#334155',
+                    color: '#F8FAFC',
+                    cursor: 'pointer',
+                    touchAction: 'manipulation',
+                    userSelect: 'none',
+                    WebkitUserSelect: 'none'
+                  }}
+                  onTouchStart={(e) => handleAdjustOffset(+0.05, e)}
+                  onClick={(e) => handleAdjustOffset(+0.05, e)}
+                  title="Increment offset by +0.05s (+50ms)"
+                >
+                  +
+                </button>
+              </div>
+
+              {lastTouchLog && (
+                <div style={{ fontSize: '0.65rem', color: '#10B981', marginTop: '0.4rem', textAlign: 'center', fontWeight: 600 }}>
+                  ✓ {lastTouchLog}
+                </div>
+              )}
+
+              {userOffset !== 0 && (
+                <div style={{ textAlign: 'center', marginTop: '0.5rem' }}>
+                  <button
+                    type="button"
+                    style={{ background: 'none', border: 'none', color: '#64748B', fontSize: '0.65rem', cursor: 'pointer', textDecoration: 'underline', touchAction: 'manipulation' }}
+                    onTouchStart={(e) => handleAdjustOffset(0, e)}
+                    onClick={(e) => handleAdjustOffset(0, e)}
+                  >
+                    Reset to 0.00s
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* HOST VIEW */}
