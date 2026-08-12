@@ -229,6 +229,37 @@ io.on('connection', (socket) => {
     }
   });
 
+  // 6.1.1 SELECT_TRACK Handler
+  socket.on('SELECT_TRACK', (data = {}, callback) => {
+    const { roomCode, trackIndex } = data;
+    const room = roomManager.getRoom(roomCode);
+    if (!room) return;
+
+    if (socket.id !== room.hostId) {
+      if (typeof callback === 'function') callback({ success: false, error: 'Only Host can select tracks.' });
+      return;
+    }
+
+    const selectedData = roomManager.selectTrack(roomCode, trackIndex);
+    if (selectedData && selectedData.track) {
+      const { filePath, ...publicAudio } = selectedData.track;
+      io.to(roomCode).emit('SONG_SELECTED', publicAudio);
+
+      const publicPlaylist = (selectedData.playlist || []).map(t => {
+        const { filePath, ...pub } = t;
+        return pub;
+      });
+
+      io.to(roomCode).emit('PLAYLIST_UPDATE', {
+        playlist: publicPlaylist,
+        currentTrackIndex: selectedData.currentTrackIndex,
+        isShuffle: room.isShuffle
+      });
+
+      if (typeof callback === 'function') callback({ success: true, track: publicAudio });
+    }
+  });
+
   // 6.2 TOGGLE_SHUFFLE Handler
   socket.on('TOGGLE_SHUFFLE', (data = {}, callback) => {
     const { roomCode, isShuffle } = data;

@@ -362,6 +362,38 @@ export class RoomManager {
   }
 
   /**
+   * Sets current track to specified index in room playlist.
+   */
+  selectTrack(roomCode, trackIndex) {
+    if (!roomCode) return null;
+    const code = String(roomCode).trim().toUpperCase();
+    const room = this.rooms.get(code);
+    if (!room || !room.playlist || room.playlist.length === 0) return null;
+
+    const idx = Math.max(0, Math.min(Number(trackIndex) || 0, room.playlist.length - 1));
+    room.currentTrackIndex = idx;
+    room.selectedAudio = room.playlist[idx];
+
+    // Reset Fisher-Yates unplayed indices pool excluding current track
+    if (room.playlist && room.playlist.length > 0) {
+      room.unplayedIndices = room.playlist
+        .map((_, i) => i)
+        .filter(i => i !== idx);
+    }
+
+    // Reset audioReady state for devices
+    for (const dev of room.devices.values()) {
+      dev.audioReady = false;
+    }
+
+    return {
+      track: room.selectedAudio,
+      currentTrackIndex: idx,
+      playlist: room.playlist
+    };
+  }
+
+  /**
    * Toggles or sets Shuffle mode for room playlist.
    */
   setShuffleMode(roomCode, isShuffle) {

@@ -71,8 +71,10 @@ class AudioEngine {
       throw new Error('No file provided');
     }
 
-    // Stop existing playback before loading new buffer
+    // Stop existing playback and clear buffer before loading new buffer
     this.stop();
+    this.currentBuffer = null;
+    this.metadata = null;
 
     const ctx = this.getAudioContext();
 

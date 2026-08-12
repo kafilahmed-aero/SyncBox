@@ -92,15 +92,48 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
   const fileInputRef = useRef(null);
   const animFrameRef = useRef(null);
   const localFilesRef = useRef(new Map());
+  const isAutoAdvancingRef = useRef(false);
 
   // Synchronization visual state
   const [syncState, setSyncState] = useState('READY');
+
+  // Reconcile full room state upon reconnect or sync
+  const reconcileRoomState = (roomData) => {
+    if (!roomData) return;
+    if (roomData.devices) setDevices(roomData.devices);
+    if (roomData.playlist) setPlaylist(roomData.playlist);
+    if (typeof roomData.currentTrackIndex === 'number') setCurrentTrackIndex(roomData.currentTrackIndex);
+    if (typeof roomData.isShuffle === 'boolean') setIsShuffle(roomData.isShuffle);
+    if (roomData.selectedAudio) {
+      processSongSelection(roomData.selectedAudio);
+    }
+  };
 
   // Top-Level Helper for Processing & Decoding Selected Audio Track (Safe from Scope Errors)
   const processSongSelection = async (payload) => {
     if (!payload || !payload.name) return;
     console.log('[Room] Processing song selection payload:', payload);
     audioEngine.updateMediaSession(payload);
+
+    // Skip redundant decode if AudioEngine already has this exact track loaded
+    const currentMeta = audioEngine.getMetadata();
+    if (currentMeta && currentMeta.name === payload.name && audioEngine.getAudioBuffer()) {
+      console.log('[Room] Track already loaded in AudioEngine:', payload.name);
+      setSongMetadata(currentMeta);
+      setSongPrepState('READY');
+      if (socket.connected) {
+        socket.emit('AUDIO_READY', { roomCode });
+      }
+
+      if (isHost && isAutoAdvancingRef.current) {
+        isAutoAdvancingRef.current = false;
+        console.log('[Room Host Auto-Advance] Already loaded. Triggering CMD_PLAY...');
+        setTimeout(() => {
+          if (socket.connected) socket.emit('CMD_PLAY', { roomCode, position: 0 });
+        }, 150);
+      }
+      return;
+    }
 
     try {
       setSongPrepState('PREPARING');
@@ -134,6 +167,14 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
         if (socket.connected) {
           socket.emit('AUDIO_READY', { roomCode });
         }
+
+        if (isHost && isAutoAdvancingRef.current) {
+          isAutoAdvancingRef.current = false;
+          console.log('[Room Host Auto-Advance] Track decoded. Triggering synchronized CMD_PLAY...');
+          setTimeout(() => {
+            if (socket.connected) socket.emit('CMD_PLAY', { roomCode, position: 0 });
+          }, 150);
+        }
       } else {
         setSongMetadata({
           name: payload.name,
@@ -145,6 +186,7 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
       }
     } catch (err) {
       console.error('[Room] Track decode error:', err);
+      isAutoAdvancingRef.current = false;
       setSongPrepState('NO SONG');
       setFileError('Failed to load audio file for selected track.');
     }
@@ -168,25 +210,19 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
 
     audioEngine.setOnEndedCallback(() => {
       console.log('[Room Track End] Current track ended.');
+      setPlaybackState('STOPPED');
+      setCurrentTime(0);
+      setSyncState('READY');
+      setDriftStats({ driftMs: 0, playbackRate: 1.0 });
+
       if (isHost) {
         console.log('[Room Host Auto-Advance] Requesting NEXT_TRACK from room playlist...');
+        isAutoAdvancingRef.current = true;
         socket.emit('NEXT_TRACK', { roomCode }, (res) => {
-          if (res && res.success && res.track) {
-            setTimeout(() => {
-              socket.emit('CMD_PLAY', { roomCode, position: 0 });
-            }, 300);
-          } else {
-            setPlaybackState('STOPPED');
-            setCurrentTime(0);
-            setSyncState('READY');
-            setDriftStats({ driftMs: 0, playbackRate: 1.0 });
+          if (!res || !res.success) {
+            isAutoAdvancingRef.current = false;
           }
         });
-      } else {
-        setPlaybackState('STOPPED');
-        setCurrentTime(0);
-        setSyncState('READY');
-        setDriftStats({ driftMs: 0, playbackRate: 1.0 });
       }
     });
 
@@ -328,9 +364,7 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
     const handleLifecycleRecovery = async () => {
       if (document.visibilityState === 'visible') {
         console.log('[Room Lifecycle] Device foregrounded. Recovering connection & audio state...');
-        if (!socket.connected) {
-          socket.connect();
-        }
+        
         try {
           const ctx = audioEngine.getAudioContext();
           if (ctx && ctx.state === 'suspended') {
@@ -338,18 +372,21 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
           }
         } catch (e) {}
 
-        socket.emit('JOIN_ROOM', { roomCode, deviceName: isHost ? 'Laptop' : 'Phone' }, (res) => {
-          if (res && res.success) {
-            if (speakerReady && songPrepState === 'READY') {
-              socket.emit('AUDIO_READY', { roomCode });
-            }
-            socket.emit('GET_ROOM_STATE', { roomCode }, (stateRes) => {
-              if (stateRes && stateRes.success && stateRes.room) {
-                reconcileRoomState(stateRes.room);
+        if (!socket.connected) {
+          socket.connect();
+          socket.emit('JOIN_ROOM', { roomCode, deviceName: isHost ? 'Laptop' : 'Phone' }, (res) => {
+            if (res && res.success) {
+              if (speakerReady && songPrepState === 'READY') {
+                socket.emit('AUDIO_READY', { roomCode });
               }
-            });
-          }
-        });
+              socket.emit('GET_ROOM_STATE', { roomCode }, (stateRes) => {
+                if (stateRes && stateRes.success && stateRes.room) {
+                  reconcileRoomState(stateRes.room);
+                }
+              });
+            }
+          });
+        }
       }
     };
 
@@ -560,27 +597,32 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
 
   const handleSelectPlaylistTrack = (index) => {
     if (!isHost) return;
-    socket.emit('NEXT_TRACK', { roomCode });
+    isAutoAdvancingRef.current = false;
+    socket.emit('SELECT_TRACK', { roomCode, trackIndex: index });
   };
 
   // Synchronized Host Playback Controls emitting Socket Events
   const handlePlay = () => {
     if (songPrepState !== 'READY' || !socket.connected) return;
+    isAutoAdvancingRef.current = false;
     socket.emit('CMD_PLAY', { roomCode, position: currentTime });
   };
 
   const handlePause = () => {
     if (!socket.connected) return;
+    isAutoAdvancingRef.current = false;
     socket.emit('CMD_PAUSE', { roomCode, position: currentTime });
   };
 
   const handleStop = () => {
     if (!socket.connected) return;
+    isAutoAdvancingRef.current = false;
     socket.emit('CMD_STOP', { roomCode });
   };
 
   const handleSeek = (targetTime) => {
     if (!socket.connected) return;
+    isAutoAdvancingRef.current = false;
     socket.emit('CMD_SEEK', { roomCode, position: targetTime });
   };
 
