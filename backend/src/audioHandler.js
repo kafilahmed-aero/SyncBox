@@ -123,7 +123,6 @@ export function registerAudioRoutes(app, roomManager, io) {
       });
     });
   });
-  });
 
   // 2. GET /audio/:songId (Speaker HTTP File Download)
   app.get('/audio/:songId', (req, res) => {
