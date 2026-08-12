@@ -214,14 +214,13 @@ class AudioEngine {
 
   /**
    * Returns estimated physical sound position reaching the speakers in seconds
-   * by compensating for hardware audio output pipeline latency and per-device user offset.
+   * by compensating for hardware audio output pipeline latency.
    */
   getAcousticPosition() {
     const rawPos = this.getCurrentPosition();
     if (this.playbackState !== 'PLAYING') return rawPos;
     const latencySec = this.getOutputLatency();
-    const netPos = rawPos - (latencySec * this.playbackRateValue) + this.userOffsetSec;
-    return Math.max(0, netPos);
+    return Math.max(0, rawPos - (latencySec * this.playbackRateValue));
   }
 
   /**

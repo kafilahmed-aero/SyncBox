@@ -119,7 +119,7 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
       }
     };
 
-  // Per-Device Sync Calibration Offset Handler
+  // Per-Device Sync Calibration Offset Handler (Instant Dynamic Audio Shift)
   const handleAdjustOffset = (deltaSec) => {
     let newOffset = 0.0;
     if (deltaSec !== 0) {
@@ -127,6 +127,14 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
     }
     setUserOffset(newOffset);
     audioEngine.setUserOffset(newOffset);
+
+    // If audio is actively playing, dynamically shift active sound position by deltaSec!
+    if (playbackState === 'PLAYING' && audioEngine.getPlaybackState() === 'PLAYING') {
+      const currentPos = audioEngine.getCurrentPosition();
+      const newPos = Math.max(0, currentPos - deltaSec);
+      console.log(`[Room Offset Adjust] Tapped offset delta (${deltaSec > 0 ? '+' : ''}${deltaSec}s). Shifting live playback from ${currentPos.toFixed(2)}s to ${newPos.toFixed(2)}s`);
+      audioEngine.seek(newPos);
+    }
   };
 
   // Listen for Room PLAYBACK_COMMAND Broadcast (Synchronized Initial Start & Playback Commands)
@@ -296,9 +304,11 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
         return;
       }
 
-      // 3. Calculate Client Acoustic Sound Position & Drift (ms)
+      // 3. Calculate Client Acoustic Sound Position & Drift relative to User Target Offset (ms)
+      const userOffsetSec = audioEngine.getUserOffset();
       const clientPosition = audioEngine.getAcousticPosition();
-      const driftMs = (clientPosition - expectedPosition) * 1000;
+      const targetExpectedPosition = Math.max(0, expectedPosition - userOffsetSec);
+      const driftMs = (clientPosition - targetExpectedPosition) * 1000;
       const absDrift = Math.abs(driftMs);
 
       let currentRate = audioEngine.getPlaybackRate();
@@ -517,17 +527,95 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
               </span>
             </div>
 
-            {/* Per-Device Interactive Calibration Controls */}
-            <div style={{ marginTop: '0.5rem', padding: '0.4rem 0.6rem', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-              <span style={{ fontSize: '0.7rem', fontWeight: 600, color: '#A7F3D0' }}>
-                🎛️ Physical Offset: {userOffset >= 0 ? `+${userOffset.toFixed(2)}s` : `${userOffset.toFixed(2)}s`}
-              </span>
-              <button type="button" className="btn btn-secondary" style={{ padding: '0.15rem 0.4rem', fontSize: '0.65rem' }} onClick={() => handleAdjustOffset(-1.0)}>-1s</button>
-              <button type="button" className="btn btn-secondary" style={{ padding: '0.15rem 0.4rem', fontSize: '0.65rem' }} onClick={() => handleAdjustOffset(-0.1)}>-0.1s</button>
-              <button type="button" className="btn btn-secondary" style={{ padding: '0.15rem 0.4rem', fontSize: '0.65rem' }} onClick={() => handleAdjustOffset(0.1)}>+0.1s</button>
-              <button type="button" className="btn btn-secondary" style={{ padding: '0.15rem 0.4rem', fontSize: '0.65rem' }} onClick={() => handleAdjustOffset(1.0)}>+1s</button>
-              <button type="button" className="btn btn-secondary" style={{ padding: '0.15rem 0.4rem', fontSize: '0.65rem' }} onClick={() => handleAdjustOffset(0)}>Reset</button>
-            </div>
+            {/* Speaker Interactive Physical Offset Calibration Bar */}
+            {!isHost && (
+              <div style={{
+                marginTop: '0.8rem',
+                padding: '0.8rem 1rem',
+                background: 'linear-gradient(135deg, rgba(30,41,59,0.7), rgba(15,23,42,0.8))',
+                border: '1px solid rgba(148,163,184,0.15)',
+                borderRadius: '12px',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#A7F3D0', letterSpacing: '0.05em' }}>
+                    🎛️ SPEAKER OFFSET CALIBRATION
+                  </span>
+                  <span style={{ fontSize: '0.7rem', color: '#94A3B8' }}>
+                    Step: ±0.1s
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1.2rem' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{
+                      width: '3.5rem',
+                      height: '3.0rem',
+                      fontSize: '1.5rem',
+                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: '10px',
+                      backgroundColor: '#1E293B',
+                      borderColor: '#334155',
+                      color: '#F8FAFC',
+                      cursor: 'pointer'
+                    }}
+                    onClick={() => handleAdjustOffset(-0.1)}
+                    title="Decrement offset by -0.1s (-100ms)"
+                  >
+                    −
+                  </button>
+
+                  <div style={{ textAlign: 'center', minWidth: '7.5rem' }}>
+                    <div style={{ fontSize: '1.5rem', fontWeight: 800, color: userOffset === 0 ? '#F8FAFC' : '#38BDF8', fontFamily: 'monospace' }}>
+                      {userOffset >= 0 ? `+${userOffset.toFixed(2)}s` : `${userOffset.toFixed(2)}s`}
+                    </div>
+                    <div style={{ fontSize: '0.65rem', color: '#94A3B8', marginTop: '0.1rem' }}>
+                      {userOffset === 0 ? 'Aligned with Host' : userOffset > 0 ? `${(userOffset * 1000).toFixed(0)}ms Delayed` : `${(Math.abs(userOffset) * 1000).toFixed(0)}ms Advanced`}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{
+                      width: '3.5rem',
+                      height: '3.0rem',
+                      fontSize: '1.5rem',
+                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: '10px',
+                      backgroundColor: '#1E293B',
+                      borderColor: '#334155',
+                      color: '#F8FAFC',
+                      cursor: 'pointer'
+                    }}
+                    onClick={() => handleAdjustOffset(+0.1)}
+                    title="Increment offset by +0.1s (+100ms)"
+                  >
+                    +
+                  </button>
+                </div>
+
+                {userOffset !== 0 && (
+                  <div style={{ textAlign: 'center', marginTop: '0.5rem' }}>
+                    <button
+                      type="button"
+                      style={{ background: 'none', border: 'none', color: '#64748B', fontSize: '0.65rem', cursor: 'pointer', textDecoration: 'underline' }}
+                      onClick={() => handleAdjustOffset(0)}
+                    >
+                      Reset to 0.00s
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <button 
             className="link-back" 
