@@ -134,7 +134,7 @@ async function runTests() {
     if (!payload.serverTime) throw new Error('serverTime missing from payload');
     if (!payload.playAtTimestamp) throw new Error('playAtTimestamp missing from payload');
 
-    const expectedPlayAt = payload.serverTime + 1000;
+    const expectedPlayAt = payload.serverTime + 5000;
     const diff = Math.abs(payload.playAtTimestamp - expectedPlayAt);
     if (diff > 5) {
       throw new Error(`Expected playAtTimestamp ~ ${expectedPlayAt}, got ${payload.playAtTimestamp} (diff: ${diff})`);

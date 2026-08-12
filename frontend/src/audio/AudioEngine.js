@@ -133,6 +133,28 @@ class AudioEngine {
   }
 
   /**
+   * Returns total hardware audio output latency in seconds (baseLatency + outputLatency)
+   * using safe feature detection across desktop and mobile browsers.
+   */
+  getOutputLatency() {
+    if (!this.audioCtx) return 0;
+    const base = Number(this.audioCtx.baseLatency) || 0;
+    const output = Number(this.audioCtx.outputLatency) || 0;
+    return base + output;
+  }
+
+  /**
+   * Returns estimated physical sound position reaching the speakers in seconds
+   * by compensating for hardware audio output pipeline latency.
+   */
+  getAcousticPosition() {
+    const rawPos = this.getCurrentPosition();
+    if (this.playbackState !== 'PLAYING') return rawPos;
+    const latencySec = this.getOutputLatency();
+    return Math.max(0, rawPos - (latencySec * this.playbackRateValue));
+  }
+
+  /**
    * Starts immediate playback of loaded AudioBuffer from current startOffset.
    */
   async play() {

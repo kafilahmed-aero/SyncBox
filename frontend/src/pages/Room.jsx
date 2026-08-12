@@ -221,8 +221,8 @@ export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }
         return;
       }
 
-      // 3. Calculate Client Position & Drift (ms)
-      const clientPosition = audioEngine.getCurrentPosition();
+      // 3. Calculate Client Acoustic Sound Position & Drift (ms)
+      const clientPosition = audioEngine.getAcousticPosition();
       const driftMs = (clientPosition - expectedPosition) * 1000;
       const absDrift = Math.abs(driftMs);
 
@@ -450,7 +450,7 @@ export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }
                 🕒 Clock Sync: {clockStats.isSynced ? `Offset ${clockStats.offset >= 0 ? '+' : ''}${clockStats.offset.toFixed(1)}ms • RTT ${clockStats.rtt.toFixed(1)}ms` : 'Syncing...'}
               </span>
               <span className="badge badge-status-default" style={{ fontSize: '0.65rem', textTransform: 'none' }}>
-                Drift: {driftStats.status === 'Resyncing...' ? 'Resyncing...' : `${driftStats.driftMs >= 0 ? '+' : ''}${driftStats.driftMs.toFixed(0)}ms • Rate ${driftStats.playbackRate.toFixed(3)}x`}
+                Drift: {driftStats.status === 'Resyncing...' ? 'Resyncing...' : `${driftStats.driftMs >= 0 ? '+' : ''}${driftStats.driftMs.toFixed(0)}ms • Rate ${driftStats.playbackRate.toFixed(3)}x • Latency ${(audioEngine.getOutputLatency() * 1000).toFixed(0)}ms`}
               </span>
             </div>
           </div>
