@@ -17,7 +17,7 @@ class ClockSync {
    * Helper to get high-resolution monotonic epoch timestamp in milliseconds.
    */
   getHighResTime() {
-    return (performance.timeOrigin || 0) + performance.now();
+    return Date.now();
   }
 
   /**

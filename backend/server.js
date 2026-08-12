@@ -136,8 +136,8 @@ io.on('connection', (socket) => {
 
   // 5. SYNC_REQUEST (Clock Synchronization)
   socket.on('SYNC_REQUEST', (data = {}, callback) => {
-    const t2 = performance.timeOrigin + performance.now();
-    const t3 = performance.timeOrigin + performance.now();
+    const t2 = Date.now();
+    const t3 = Date.now();
 
     if (typeof callback === 'function') {
       callback({

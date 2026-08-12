@@ -183,7 +183,7 @@ export class RoomManager {
       room.playbackState = 'PLAYING';
       room.lastPlaybackPosition = targetPosition;
       room.lastCommandTimestamp = serverTimestamp;
-      playAtTimestamp = serverTimestamp + 5000; // 5000ms lead time for PLAY
+      playAtTimestamp = serverTimestamp + 2000; // 2000ms lead time for PLAY
     } else if (command === 'PAUSE') {
       room.playbackState = 'PAUSED';
       room.lastPlaybackPosition = targetPosition;
