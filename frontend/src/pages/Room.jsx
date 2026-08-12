@@ -106,7 +106,7 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
       size: payload.size,
       type: payload.type
     });
-    setSongPrepState('SONG SELECTED');
+    setSongPrepState(isHost ? 'READY' : 'SONG SELECTED');
 
     if (!isHost && payload.audioUrl) {
       try {
