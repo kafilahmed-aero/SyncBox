@@ -8,6 +8,10 @@ import { audioEngine } from '../audio/AudioEngine';
 import { clockSync } from '../audio/ClockSync';
 import { socket } from '../socket';
 
+// TEMPORARY CONTROLLED DIAGNOSTIC MODE FLAG (Set to false to restore normal auto-correction)
+const SYNC_DIAGNOSTIC_MODE = true;
+const DIAGNOSTIC_SPEAKER_DELAY_SEC = 1.000; // 1000ms intentional delay for Speaker
+
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:4000';
 
 export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }) {
@@ -135,9 +139,17 @@ export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }
           const delta = playAtTimestamp - clockSync.getServerTime();
 
           if (delta > 0) {
-            // Future target: schedule Web Audio start
+            // Future target: schedule Web Audio start compensated for hardware output latency
             const ctx = audioEngine.getAudioContext();
-            const targetAudioCtxTime = clockSync.toAudioContextTime(playAtTimestamp, ctx);
+            const rawTargetAudioCtxTime = clockSync.toAudioContextTime(playAtTimestamp, ctx);
+            const outputLatencySec = audioEngine.getOutputLatency();
+            let targetAudioCtxTime = Math.max(ctx.currentTime, rawTargetAudioCtxTime - outputLatencySec);
+
+            // TEMPORARY DIAGNOSTIC MODE: Apply intentional +1000ms delay to Speaker
+            if (SYNC_DIAGNOSTIC_MODE && !isHost) {
+              console.log('[Room Diagnostic Mode] Applying +1000ms Speaker scheduling delay');
+              targetAudioCtxTime += DIAGNOSTIC_SPEAKER_DELAY_SEC;
+            }
 
             console.log(`[Room] Scheduling playback at AudioContext time ${targetAudioCtxTime.toFixed(3)}s (in ${delta.toFixed(1)}ms)`);
             await audioEngine.playScheduled(targetAudioCtxTime, position);
@@ -226,6 +238,17 @@ export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }
       const clientPosition = audioEngine.getAcousticPosition();
       const driftMs = (clientPosition - expectedPosition) * 1000;
       const absDrift = Math.abs(driftMs);
+
+      // TEMPORARY DIAGNOSTIC MODE: Calculate & display drift, but DO NOT execute correction
+      if (SYNC_DIAGNOSTIC_MODE) {
+        audioEngine.setPlaybackRate(1.000);
+        setDriftStats({
+          driftMs,
+          playbackRate: 1.000,
+          status: isHost ? 'DIAGNOSTIC (HOST)' : 'DIAGNOSTIC (+1000ms Delay)'
+        });
+        return;
+      }
 
       let currentRate = audioEngine.getPlaybackRate();
 
@@ -447,11 +470,16 @@ export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }
             </div>
             {/* Extended Diagnostics Badge */}
             <div style={{ marginTop: '0.4rem', display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+              {SYNC_DIAGNOSTIC_MODE && (
+                <span className="badge badge-status-default" style={{ fontSize: '0.65rem', textTransform: 'none', backgroundColor: '#4C1D95', color: '#E9D5FF' }}>
+                  🧪 SYNC DIAGNOSTIC MODE: ON ({isHost ? 'HOST' : 'SPEAKER +1000ms'}) • Correction: DISABLED
+                </span>
+              )}
               <span className="badge badge-status-default" style={{ fontSize: '0.65rem', textTransform: 'none' }}>
                 🕒 Clock: {clockStats.isSynced ? `Offset ${clockStats.offset >= 0 ? '+' : ''}${clockStats.offset.toFixed(1)}ms • RTT ${clockStats.rtt.toFixed(1)}ms` : 'Syncing...'}
               </span>
               <span className="badge badge-status-default" style={{ fontSize: '0.65rem', textTransform: 'none' }}>
-                Drift: {driftStats.status === 'Resyncing...' ? 'Resyncing...' : `${driftStats.driftMs >= 0 ? '+' : ''}${driftStats.driftMs.toFixed(0)}ms • Rate ${driftStats.playbackRate.toFixed(3)}x`}
+                Drift: {driftStats.driftMs >= 0 ? '+' : ''}${driftStats.driftMs.toFixed(0)}ms • Rate ${driftStats.playbackRate.toFixed(3)}x
               </span>
               <span className="badge badge-status-default" style={{ fontSize: '0.65rem', textTransform: 'none' }}>
                 {(() => {
