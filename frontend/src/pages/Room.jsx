@@ -125,7 +125,7 @@ export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }
       // Store timeline reference
       lastCommandRef.current = {
         position: position,
-        serverTime: serverTime || Date.now()
+        serverTime: playAtTimestamp || serverTime || Date.now()
       };
 
       if (command === 'PLAY') {
@@ -200,6 +200,11 @@ export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }
       const serverNow = clockSync.getServerTime();
       const lastPos = lastCommandRef.current.position;
       const lastTime = lastCommandRef.current.serverTime;
+
+      // Do not evaluate drift if playback has not yet reached scheduled timeline origin (lead time)
+      if (serverNow < lastTime) {
+        return;
+      }
 
       // Calculate Expected Server Reference Position
       const elapsedSeconds = Math.max(0, (serverNow - lastTime) / 1000);
