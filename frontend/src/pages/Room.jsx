@@ -61,7 +61,7 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
     // 4. Record touch log for instant visual feedback on mobile touchscreens
     const actionLabel = deltaSec === 0 
       ? 'Reset to 0.00s' 
-      : `Tapped ${deltaSec > 0 ? '+' : ''}${deltaSec.toFixed(1)}s (Offset: ${newOffset >= 0 ? '+' : ''}${newOffset.toFixed(2)}s)`;
+      : `Tapped ${deltaSec > 0 ? '+' : ''}${deltaSec.toFixed(2)}s (Offset: ${newOffset >= 0 ? '+' : ''}${newOffset.toFixed(2)}s)`;
     setLastTouchLog(actionLabel);
     console.log(`[Room Touch Adjust] ${actionLabel}`);
   };
@@ -655,7 +655,7 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
                     🎛️ SPEAKER OFFSET CALIBRATION
                   </span>
                   <span style={{ fontSize: '0.7rem', color: '#94A3B8' }}>
-                    Step: ±0.1s
+                    Step: ±0.05s
                   </span>
                 </div>
 
@@ -680,9 +680,9 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
                       userSelect: 'none',
                       WebkitUserSelect: 'none'
                     }}
-                    onTouchStart={(e) => handleAdjustOffset(-0.1, e)}
-                    onClick={(e) => handleAdjustOffset(-0.1, e)}
-                    title="Decrement offset by -0.1s (-100ms)"
+                    onTouchStart={(e) => handleAdjustOffset(-0.05, e)}
+                    onClick={(e) => handleAdjustOffset(-0.05, e)}
+                    title="Decrement offset by -0.05s (-50ms)"
                   >
                     −
                   </button>
@@ -716,9 +716,9 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
                       userSelect: 'none',
                       WebkitUserSelect: 'none'
                     }}
-                    onTouchStart={(e) => handleAdjustOffset(+0.1, e)}
-                    onClick={(e) => handleAdjustOffset(+0.1, e)}
-                    title="Increment offset by +0.1s (+100ms)"
+                    onTouchStart={(e) => handleAdjustOffset(+0.05, e)}
+                    onClick={(e) => handleAdjustOffset(+0.05, e)}
+                    title="Increment offset by +0.05s (+50ms)"
                   >
                     +
                   </button>
