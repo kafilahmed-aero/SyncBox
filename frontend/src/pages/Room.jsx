@@ -680,12 +680,24 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
             )}
           </div>
           <button 
-            className="link-back" 
-            style={{ margin: 0 }}
+            type="button"
+            className="btn btn-secondary" 
+            style={{
+              margin: 0,
+              padding: '0.45rem 0.85rem',
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              backgroundColor: 'rgba(239, 68, 68, 0.15)',
+              borderColor: 'rgba(239, 68, 68, 0.4)',
+              color: '#FCA5A5',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              touchAction: 'manipulation'
+            }}
             onClick={handleLeave}
             id="btn-leave-room"
           >
-            Leave Room
+            🚪 Leave Room
           </button>
         </div>
 
