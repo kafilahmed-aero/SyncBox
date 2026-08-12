@@ -139,11 +139,16 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
       setSongPrepState('PREPARING');
 
       let audioFileToDecode = null;
+      const rawName = payload.name || '';
+      const normName = rawName.trim().toLowerCase();
 
       // 1. Check if file is cached in local memory (Host instant decode)
-      if (localFilesRef.current.has(payload.name)) {
-        console.log('[Room] Loading track from local file cache:', payload.name);
-        audioFileToDecode = localFilesRef.current.get(payload.name);
+      if (localFilesRef.current.has(rawName)) {
+        console.log('[Room] Loading track from local file cache:', rawName);
+        audioFileToDecode = localFilesRef.current.get(rawName);
+      } else if (localFilesRef.current.has(normName)) {
+        console.log('[Room] Loading track from normalized local file cache:', normName);
+        audioFileToDecode = localFilesRef.current.get(normName);
       } else if (payload.audioUrl) {
         // 2. Fetch audio file from server URL (Speaker or reconnected Host)
         const fullAudioUrl = payload.audioUrl.startsWith('http') 
@@ -542,6 +547,7 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
     // Cache files locally in memory for instant decoding on track switches
     files.forEach(f => {
       localFilesRef.current.set(f.name, f);
+      localFilesRef.current.set(f.name.trim().toLowerCase(), f);
     });
 
     setFileError(null);

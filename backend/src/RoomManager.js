@@ -158,6 +158,10 @@ export class RoomManager {
       if (room.selectedAudio && room.selectedAudio.songId === songId) {
         return room.selectedAudio;
       }
+      if (room.playlist && Array.isArray(room.playlist)) {
+        const found = room.playlist.find(track => track && track.songId === songId);
+        if (found) return found;
+      }
     }
     return null;
   }
