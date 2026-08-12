@@ -86,11 +86,12 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
   const [playbackState, setPlaybackState] = useState(() => audioEngine.getPlaybackState());
   const [currentTime, setCurrentTime] = useState(() => audioEngine.getCurrentPosition());
 
-  // Refs for tracking timeline command timestamps & touch debouncing
+  // Refs for tracking timeline command timestamps, touch debouncing, & local file cache
   const lastCommandRef = useRef({ position: 0, serverTime: Date.now() });
   const isResyncingRef = useRef(false);
   const fileInputRef = useRef(null);
   const animFrameRef = useRef(null);
+  const localFilesRef = useRef(new Map());
 
   // Synchronization visual state
   const [syncState, setSyncState] = useState('READY');
@@ -100,41 +101,52 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
     if (!payload || !payload.name) return;
     console.log('[Room] Processing song selection payload:', payload);
     audioEngine.updateMediaSession(payload);
-    setSongMetadata({
-      name: payload.name,
-      duration: payload.duration,
-      size: payload.size,
-      type: payload.type
-    });
-    setSongPrepState(isHost ? 'READY' : 'SONG SELECTED');
 
-    if (!isHost && payload.audioUrl) {
-      try {
-        setSongPrepState('PREPARING');
+    try {
+      setSongPrepState('PREPARING');
+
+      let audioFileToDecode = null;
+
+      // 1. Check if file is cached in local memory (Host instant decode)
+      if (localFilesRef.current.has(payload.name)) {
+        console.log('[Room] Loading track from local file cache:', payload.name);
+        audioFileToDecode = localFilesRef.current.get(payload.name);
+      } else if (payload.audioUrl) {
+        // 2. Fetch audio file from server URL (Speaker or reconnected Host)
         const fullAudioUrl = payload.audioUrl.startsWith('http') 
           ? payload.audioUrl 
           : `${BACKEND_URL}${payload.audioUrl}`;
 
-        console.log('[Room] Speaker downloading audio file from:', fullAudioUrl);
+        console.log('[Room] Downloading track from server URL:', fullAudioUrl);
         const response = await fetch(fullAudioUrl);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
         const blob = await response.blob();
-        const file = new File([blob], payload.name, { type: payload.type || 'audio/mpeg' });
+        audioFileToDecode = new File([blob], payload.name, { type: payload.type || 'audio/mpeg' });
+      }
 
-        const meta = await audioEngine.loadAndDecodeAudioFile(file);
+      if (audioFileToDecode) {
+        const meta = await audioEngine.loadAndDecodeAudioFile(audioFileToDecode);
         setSongMetadata(meta);
         setSongPrepState('READY');
-        console.log('[Room] Speaker audio decoded successfully.');
+        console.log('[Room] Track decoded successfully:', payload.name);
 
         if (socket.connected) {
           socket.emit('AUDIO_READY', { roomCode });
         }
-      } catch (err) {
-        console.error('[Room] Speaker audio download/decode error:', err);
-        setSongPrepState('NO SONG');
-        setFileError('Failed to download audio file from room host.');
+      } else {
+        setSongMetadata({
+          name: payload.name,
+          duration: payload.duration,
+          size: payload.size,
+          type: payload.type
+        });
+        setSongPrepState('READY');
       }
+    } catch (err) {
+      console.error('[Room] Track decode error:', err);
+      setSongPrepState('NO SONG');
+      setFileError('Failed to load audio file for selected track.');
     }
   };
 
@@ -489,6 +501,11 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
   const handleFileChange = async (e) => {
     const files = Array.from(e.target.files || []);
     if (!files || files.length === 0) return;
+
+    // Cache files locally in memory for instant decoding on track switches
+    files.forEach(f => {
+      localFilesRef.current.set(f.name, f);
+    });
 
     setFileError(null);
     setSongPrepState('SONG SELECTED');
