@@ -18,12 +18,25 @@ export default function JoinRoom({ onJoinRoom, onNavigate }) {
     setIsJoining(true);
     setError(null);
 
+    let acked = false;
+    const timeoutTimer = setTimeout(() => {
+      if (!acked) {
+        acked = true;
+        setIsJoining(false);
+        setError('Connection timeout. Unable to reach SyncBox server. Please check your network connection.');
+      }
+    }, 6000);
+
     if (!socket.connected) {
       socket.connect();
     }
 
     socket.emit('JOIN_ROOM', { roomCode: finalCode, deviceName: 'Phone' }, (res) => {
+      if (acked) return;
+      acked = true;
+      clearTimeout(timeoutTimer);
       setIsJoining(false);
+
       if (res && res.success) {
         onJoinRoom(res.roomCode, false);
       } else {

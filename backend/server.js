@@ -6,7 +6,11 @@ import { RoomManager } from './src/RoomManager.js';
 import { registerAudioRoutes } from './src/audioHandler.js';
 
 const PORT = process.env.PORT || 4000;
-const ALLOWED_ORIGINS = ['http://localhost:3000', 'http://127.0.0.1:3000'];
+const ALLOWED_ORIGINS = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  ...(process.env.CLIENT_ORIGIN ? [process.env.CLIENT_ORIGIN] : ['https://sync-box-blond.vercel.app'])
+];
 
 const app = express();
 const roomManager = new RoomManager();

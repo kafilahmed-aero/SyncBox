@@ -10,12 +10,25 @@ export default function CreateRoom({ onCreateRoom, onNavigate }) {
     setIsCreating(true);
     setError(null);
 
+    let acked = false;
+    const timeoutTimer = setTimeout(() => {
+      if (!acked) {
+        acked = true;
+        setIsCreating(false);
+        setError('Connection timeout. Unable to reach SyncBox server. Please check your network connection.');
+      }
+    }, 6000);
+
     if (!socket.connected) {
       socket.connect();
     }
 
     socket.emit('CREATE_ROOM', { deviceName: 'Laptop' }, (res) => {
+      if (acked) return;
+      acked = true;
+      clearTimeout(timeoutTimer);
       setIsCreating(false);
+
       if (res && res.success) {
         onCreateRoom(res.roomCode, true);
       } else {

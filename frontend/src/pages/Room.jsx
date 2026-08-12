@@ -8,7 +8,7 @@ import { audioEngine } from '../audio/AudioEngine';
 import { clockSync } from '../audio/ClockSync';
 import { socket } from '../socket';
 
-const BACKEND_URL = 'http://localhost:4000';
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:4000';
 
 export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }) {
   // Speaker Web Audio API activation state
