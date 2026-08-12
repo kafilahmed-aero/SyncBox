@@ -145,22 +145,30 @@ export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }
             const outputLatencySec = audioEngine.getOutputLatency();
             let targetAudioCtxTime = Math.max(ctx.currentTime, rawTargetAudioCtxTime - outputLatencySec);
 
-            // TEMPORARY DIAGNOSTIC MODE: Apply intentional +1000ms delay to Speaker
-            if (SYNC_DIAGNOSTIC_MODE && !isHost) {
-              console.log('[Room Diagnostic Mode] Applying +1000ms Speaker scheduling delay');
-              targetAudioCtxTime += DIAGNOSTIC_SPEAKER_DELAY_SEC;
+            // Intentional 1-second delay on Speaker
+            if (!isHost) {
+              console.log('[Room] Speaker applying 1.0s scheduling delay');
+              targetAudioCtxTime += 1.0;
             }
 
             console.log(`[Room] Scheduling playback at AudioContext time ${targetAudioCtxTime.toFixed(3)}s (in ${delta.toFixed(1)}ms)`);
             await audioEngine.playScheduled(targetAudioCtxTime, position);
           } else {
-            // Late arrival fallback: start immediately at adjusted position
+            // Late arrival fallback: schedule 1 sec later for Speaker, or immediately for Host
             const lateMs = Math.abs(delta);
             const adjustedPosition = position + (lateMs / 1000);
             const totalDuration = audioEngine.getDuration();
             const clampedPosition = Math.min(adjustedPosition, totalDuration);
-            console.log(`[Room] Late command arrival (${lateMs.toFixed(1)}ms late). Starting immediately at adjusted pos ${clampedPosition.toFixed(2)}s`);
-            await audioEngine.playScheduled(0, clampedPosition);
+            const ctx = audioEngine.getAudioContext();
+
+            if (!isHost) {
+              const speakerDelayedTarget = ctx.currentTime + 1.0;
+              console.log(`[Room] Speaker late arrival. Delaying start by 1.0s at AudioContext time ${speakerDelayedTarget.toFixed(3)}s`);
+              await audioEngine.playScheduled(speakerDelayedTarget, position);
+            } else {
+              console.log(`[Room] Host late arrival (${lateMs.toFixed(1)}ms late). Starting immediately at adjusted pos ${clampedPosition.toFixed(2)}s`);
+              await audioEngine.playScheduled(0, clampedPosition);
+            }
           }
         } else {
           await audioEngine.play();
