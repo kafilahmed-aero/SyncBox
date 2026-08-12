@@ -94,6 +94,7 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
   const localFilesRef = useRef(new Map());
   const isAutoAdvancingRef = useRef(false);
   const lastUiUpdateRef = useRef(0);
+  const pendingPlayRef = useRef(false);
 
   // Synchronization visual state
   const [syncState, setSyncState] = useState('READY');
@@ -118,7 +119,13 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
 
     // Skip redundant decode if AudioEngine already has this exact track loaded
     const currentMeta = audioEngine.getMetadata();
-    if (currentMeta && currentMeta.name === payload.name && audioEngine.getAudioBuffer()) {
+    if (
+      currentMeta && 
+      currentMeta.name && 
+      payload.name && 
+      currentMeta.name.trim().toLowerCase() === payload.name.trim().toLowerCase() && 
+      audioEngine.getAudioBuffer()
+    ) {
       console.log('[Room] Track already loaded in AudioEngine:', payload.name);
       setSongMetadata(currentMeta);
       setSongPrepState('READY');
@@ -126,9 +133,10 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
         socket.emit('AUDIO_READY', { roomCode });
       }
 
-      if (isHost && isAutoAdvancingRef.current) {
+      if (isHost && (isAutoAdvancingRef.current || pendingPlayRef.current)) {
         isAutoAdvancingRef.current = false;
-        console.log('[Room Host Auto-Advance] Already loaded. Triggering CMD_PLAY...');
+        pendingPlayRef.current = false;
+        console.log('[Room Host Auto-Advance/PendingPlay] Already loaded. Triggering CMD_PLAY...');
         setTimeout(() => {
           if (socket.connected) socket.emit('CMD_PLAY', { roomCode, position: 0 });
         }, 150);
@@ -541,7 +549,11 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
   const handleOpenPicker = () => {
     if (fileInputRef.current) {
       fileInputRef.current.value = null;
-      fileInputRef.current.click();
+      setTimeout(() => {
+        if (fileInputRef.current) {
+          fileInputRef.current.click();
+        }
+      }, 10);
     }
   };
 
@@ -550,6 +562,11 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
     const files = Array.from(e.target.files || []);
     if (!files || files.length === 0) return;
 
+    // Immediately stop active playback and reset state so UI is responsive
+    audioEngine.stop();
+    setPlaybackState('STOPPED');
+    setCurrentTime(0);
+
     // Cache files locally in memory for instant decoding on track switches
     files.forEach(f => {
       localFilesRef.current.set(f.name, f);
@@ -557,45 +574,56 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
     });
 
     setFileError(null);
-    setSongPrepState('SONG SELECTED');
+    setSongPrepState('PREPARING');
 
     try {
-      setSongPrepState('PREPARING');
-      
-      // 1. Local Web Audio Decoding for first track
+      // 1. Local Web Audio Decoding for first track (Host instant decode)
       const meta = await audioEngine.loadAndDecodeAudioFile(files[0]);
       setSongMetadata(meta);
-      setPlaybackState('STOPPED');
-      setCurrentTime(0);
-
-      // 2. Build FormData for all selected batch files
-      const formData = new FormData();
-      files.forEach(f => formData.append('audio', f));
-      formData.append('roomCode', roomCode);
-      formData.append('duration', meta.duration);
-
-      const uploadRes = await fetch(`${BACKEND_URL}/upload-audio`, {
-        method: 'POST',
-        body: formData
-      });
-
-      const uploadJson = await uploadRes.json();
-      if (!uploadRes.ok || !uploadJson.success) {
-        throw new Error(uploadJson.error || 'Server upload failed');
-      }
-
-      if (uploadJson.tracks) {
-        setPlaylist(uploadJson.tracks);
-      }
-
       setSongPrepState('READY');
       setSpeakerReady(true);
+
       if (socket.connected) {
         socket.emit('AUDIO_READY', { roomCode });
       }
-      console.log(`[Room] Host uploaded ${files.length} tracks to room playlist.`);
+
+      console.log(`[Room] First track decoded locally: ${files[0].name}. Host ready.`);
+
+      // If user tapped PLAY while decoding, auto-start playback immediately!
+      if (pendingPlayRef.current) {
+        pendingPlayRef.current = false;
+        if (socket.connected) {
+          console.log('[Room] Executing pending play command after local decode...');
+          socket.emit('CMD_PLAY', { roomCode, position: 0 });
+        }
+      }
+
+      // 2. Asynchronously upload files to server for room speakers (Background Sync)
+      (async () => {
+        try {
+          const formData = new FormData();
+          files.forEach(f => formData.append('audio', f));
+          formData.append('roomCode', roomCode);
+          formData.append('duration', meta.duration);
+
+          const uploadRes = await fetch(`${BACKEND_URL}/upload-audio`, {
+            method: 'POST',
+            body: formData
+          });
+
+          const uploadJson = await uploadRes.json();
+          if (uploadRes.ok && uploadJson.success) {
+            if (uploadJson.tracks) {
+              setPlaylist(uploadJson.tracks);
+            }
+            console.log(`[Room] Host uploaded ${files.length} tracks to room playlist in background.`);
+          }
+        } catch (uploadErr) {
+          console.warn('[Room] Background upload warning:', uploadErr);
+        }
+      })();
     } catch (err) {
-      console.error('[SyncBox Room] File decode/upload error:', err);
+      console.error('[SyncBox Room] File decode error:', err);
       setFileError('Unable to process audio files. Please select valid MP3, WAV, or OGG files.');
       setSongPrepState('NO SONG');
       setSongMetadata(null);
@@ -615,8 +643,16 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
 
   // Synchronized Host Playback Controls emitting Socket Events
   const handlePlay = () => {
-    if (songPrepState !== 'READY' || !socket.connected) return;
+    if (!socket.connected) return;
+
+    if (songPrepState !== 'READY') {
+      console.log('[Room] Play tapped while song is preparing. Queuing auto-play once ready...');
+      pendingPlayRef.current = true;
+      return;
+    }
+
     isAutoAdvancingRef.current = false;
+    pendingPlayRef.current = false;
     socket.emit('CMD_PLAY', { roomCode, position: currentTime });
   };
 
@@ -658,7 +694,7 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
             type="file"
             ref={fileInputRef}
             onChange={handleFileChange}
-            accept="audio/*"
+            accept=".mp3,.wav,.ogg,.m4a,.aac,.flac,audio/mpeg,audio/mp3,audio/wav,audio/ogg,audio/aac,audio/flac,audio/mp4"
             multiple
             style={{ display: 'none' }}
             id="hidden-file-input"
@@ -892,6 +928,7 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
                 onSeek={handleSeek}
                 onSelectFileClick={handleOpenPicker}
                 isHost={true}
+                songPrepState={songPrepState}
               />
             </div>
 

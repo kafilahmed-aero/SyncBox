@@ -1,6 +1,6 @@
 import React from 'react';
 
-export default function DeviceItem({ name, role, status }) {
+const DeviceItem = React.memo(function DeviceItem({ name, role, status }) {
   const getStatusBadgeClass = (st) => {
     switch (st) {
       case 'CONNECTED':
@@ -37,4 +37,6 @@ export default function DeviceItem({ name, role, status }) {
       </span>
     </div>
   );
-}
+});
+
+export default DeviceItem;

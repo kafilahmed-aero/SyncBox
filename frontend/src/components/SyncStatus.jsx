@@ -1,6 +1,6 @@
 import React from 'react';
 
-export default function SyncStatus({ status = 'WAITING' }) {
+const SyncStatus = React.memo(function SyncStatus({ status = 'WAITING' }) {
   const getSyncStyle = (st) => {
     switch (st) {
       case 'SYNCED':
@@ -37,4 +37,6 @@ export default function SyncStatus({ status = 'WAITING' }) {
       <span className="sync-status-text">{status}</span>
     </div>
   );
-}
+});
+
+export default SyncStatus;

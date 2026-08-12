@@ -78,13 +78,18 @@ class AudioEngine {
 
     const ctx = this.getAudioContext();
 
-    // 1. Read file as ArrayBuffer
-    const arrayBuffer = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(new Error('Failed to read local audio file.'));
-      reader.readAsArrayBuffer(file);
-    });
+    // 1. Read file as ArrayBuffer using high-performance Native Blob/File API
+    let arrayBuffer;
+    if (typeof file.arrayBuffer === 'function') {
+      arrayBuffer = await file.arrayBuffer();
+    } else {
+      arrayBuffer = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('Failed to read local audio file.'));
+        reader.readAsArrayBuffer(file);
+      });
+    }
 
     // 2. Decode AudioData to AudioBuffer
     const audioBuffer = await ctx.decodeAudioData(arrayBuffer);

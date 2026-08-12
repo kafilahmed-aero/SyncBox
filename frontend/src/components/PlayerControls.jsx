@@ -9,7 +9,7 @@ function formatTime(seconds) {
   return `${mm}:${ss}`;
 }
 
-export default function PlayerControls({ 
+const PlayerControls = React.memo(function PlayerControls({ 
   songName = 'No song selected',
   playbackState = 'STOPPED', 
   currentTime = 0, 
@@ -21,7 +21,8 @@ export default function PlayerControls({
   onStop, 
   onSeek,
   onSelectFileClick,
-  isHost = true
+  isHost = true,
+  songPrepState = 'READY'
 }) {
   return (
     <div className="player-controls-container">
@@ -62,7 +63,7 @@ export default function PlayerControls({
           onClick={onPlay}
           id="btn-player-play"
         >
-          PLAY
+          {songPrepState === 'PREPARING' ? 'LOADING...' : 'PLAY'}
         </button>
         <button 
           className={`btn btn-control ${playbackState === 'PAUSED' ? 'btn-control-active' : ''}`}
@@ -92,4 +93,6 @@ export default function PlayerControls({
       )}
     </div>
   );
-}
+});
+
+export default PlayerControls;

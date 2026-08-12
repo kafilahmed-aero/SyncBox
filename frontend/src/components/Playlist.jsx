@@ -1,6 +1,6 @@
 import React from 'react';
 
-export default function Playlist({ 
+const Playlist = React.memo(function Playlist({ 
   playlist = [], 
   currentTrackIndex = 0, 
   isShuffle = false, 
@@ -143,4 +143,6 @@ export default function Playlist({
       </div>
     </div>
   );
-}
+});
+
+export default Playlist;
