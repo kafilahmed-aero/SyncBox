@@ -137,13 +137,7 @@ export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }
           if (delta > 0) {
             // Future target: schedule Web Audio start
             const ctx = audioEngine.getAudioContext();
-            let targetAudioCtxTime = clockSync.toAudioContextTime(playAtTimestamp, ctx);
-
-            // TEMPORARY DIAGNOSTIC TEST: Intentionally delay Speaker start by +1000ms (+1.0s)
-            if (!isHost) {
-              console.log('[Room Diagnostic Test] Applying +1000ms artificial Speaker scheduling delay');
-              targetAudioCtxTime += 1.0;
-            }
+            const targetAudioCtxTime = clockSync.toAudioContextTime(playAtTimestamp, ctx);
 
             console.log(`[Room] Scheduling playback at AudioContext time ${targetAudioCtxTime.toFixed(3)}s (in ${delta.toFixed(1)}ms)`);
             await audioEngine.playScheduled(targetAudioCtxTime, position);
@@ -451,18 +445,13 @@ export default function Room({ roomCode = 'ABC123', isHost = true, onLeaveRoom }
                 {isHost ? 'HOST VIEW' : 'SPEAKER VIEW'}
               </span>
             </div>
-            {/* Phase 7 Diagnostics Badge */}
+            {/* Diagnostics Badge */}
             <div style={{ marginTop: '0.4rem', display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
               <span className="badge badge-status-default" style={{ fontSize: '0.65rem', textTransform: 'none' }}>
-                🕒 Clock Sync: {clockStats.isSynced ? `Offset ${clockStats.offset >= 0 ? '+' : ''}${clockStats.offset.toFixed(1)}ms • RTT ${clockStats.rtt.toFixed(1)}ms` : 'Syncing...'}
+                🕒 Clock: {clockStats.isSynced ? `Offset ${clockStats.offset >= 0 ? '+' : ''}${clockStats.offset.toFixed(1)}ms • RTT ${clockStats.rtt.toFixed(1)}ms` : 'Syncing...'}
               </span>
-              {!isHost && (
-                <span className="badge badge-status-default" style={{ fontSize: '0.65rem', textTransform: 'none', backgroundColor: '#4C1D95', color: '#E9D5FF' }}>
-                  🧪 SYNC TEST: SPEAKER +1000ms
-                </span>
-              )}
               <span className="badge badge-status-default" style={{ fontSize: '0.65rem', textTransform: 'none' }}>
-                Drift: {driftStats.status === 'Resyncing...' ? 'Resyncing...' : `${driftStats.driftMs >= 0 ? '+' : ''}${driftStats.driftMs.toFixed(0)}ms • Rate ${driftStats.playbackRate.toFixed(3)}x • Latency ${(audioEngine.getOutputLatency() * 1000).toFixed(0)}ms`}
+                Drift: {driftStats.status === 'Resyncing...' ? 'Resyncing...' : `${driftStats.driftMs >= 0 ? '+' : ''}${driftStats.driftMs.toFixed(0)}ms • Rate ${driftStats.playbackRate.toFixed(3)}x • OutLatency ${(audioEngine.getOutputLatency() * 1000).toFixed(0)}ms`}
               </span>
             </div>
           </div>
