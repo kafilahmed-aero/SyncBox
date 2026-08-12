@@ -121,20 +121,23 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
 
   // Per-Device Sync Calibration Offset Handler (Instant Dynamic Audio Shift)
   const handleAdjustOffset = (deltaSec) => {
-    let newOffset = 0.0;
-    if (deltaSec !== 0) {
-      newOffset = Number((userOffset + deltaSec).toFixed(2));
-    }
-    setUserOffset(newOffset);
-    audioEngine.setUserOffset(newOffset);
+    setUserOffset((prevOffset) => {
+      let newOffset = 0.0;
+      if (deltaSec !== 0) {
+        newOffset = Number((prevOffset + deltaSec).toFixed(2));
+      }
+      console.log(`[Room Offset Adjust] Tapped delta (${deltaSec > 0 ? '+' : ''}${deltaSec}s). New offset: ${newOffset.toFixed(2)}s`);
+      audioEngine.setUserOffset(newOffset);
 
-    // If audio is actively playing, dynamically shift active sound position by deltaSec!
-    if (playbackState === 'PLAYING' && audioEngine.getPlaybackState() === 'PLAYING') {
-      const currentPos = audioEngine.getCurrentPosition();
-      const newPos = Math.max(0, currentPos - deltaSec);
-      console.log(`[Room Offset Adjust] Tapped offset delta (${deltaSec > 0 ? '+' : ''}${deltaSec}s). Shifting live playback from ${currentPos.toFixed(2)}s to ${newPos.toFixed(2)}s`);
-      audioEngine.seek(newPos);
-    }
+      // If audio is actively playing, dynamically shift active sound position by deltaSec!
+      if (audioEngine.getPlaybackState() === 'PLAYING') {
+        const currentPos = audioEngine.getCurrentPosition();
+        const newPos = Math.max(0, currentPos - deltaSec);
+        console.log(`[Room Offset Adjust] Dynamic live audio shift from ${currentPos.toFixed(2)}s to ${newPos.toFixed(2)}s`);
+        audioEngine.seek(newPos);
+      }
+      return newOffset;
+    });
   };
 
   // Listen for Room PLAYBACK_COMMAND Broadcast (Synchronized Initial Start & Playback Commands)
@@ -442,6 +445,10 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
       }
 
       setSongPrepState('READY');
+      setSpeakerReady(true);
+      if (socket.connected) {
+        socket.emit('AUDIO_READY', { roomCode });
+      }
       console.log('[Room] Host audio uploaded and broadcast via backend server.');
     } catch (err) {
       console.error('[SyncBox Room] File decode/upload error:', err);
