@@ -93,6 +93,7 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
   const processSongSelection = async (payload) => {
     if (!payload || !payload.name) return;
     console.log('[Room] Processing song selection payload:', payload);
+    audioEngine.updateMediaSession(payload);
     setSongMetadata({
       name: payload.name,
       duration: payload.duration,

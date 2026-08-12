@@ -98,7 +98,90 @@ class AudioEngine {
       numberOfChannels: audioBuffer.numberOfChannels
     };
 
+    // 4. Register Web MediaSession API for Mobile Lock-Screen Background Playback
+    this.updateMediaSession(this.metadata);
+
     return this.metadata;
+  }
+
+  /**
+   * Initializes silent audio HTML5 element bridge for persistent OS background audio execution.
+   */
+  initSilentAudioBridge() {
+    if (!this.silentAudioElement && typeof document !== 'undefined') {
+      try {
+        const audio = document.createElement('audio');
+        audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+        audio.loop = true;
+        audio.volume = 0.01;
+        this.silentAudioElement = audio;
+      } catch (e) {
+        console.warn('[AudioEngine] Silent audio bridge warning:', e);
+      }
+    }
+  }
+
+  playSilentBridge() {
+    this.initSilentAudioBridge();
+    if (this.silentAudioElement) {
+      this.silentAudioElement.play().catch(() => {});
+    }
+  }
+
+  pauseSilentBridge() {
+    if (this.silentAudioElement) {
+      this.silentAudioElement.pause();
+    }
+  }
+
+  /**
+   * Registers Web MediaSession API metadata & action handlers for Mobile Lock-Screen Media Widget.
+   */
+  updateMediaSession(meta) {
+    if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+      try {
+        const trackTitle = (meta && meta.name) ? meta.name : 'SyncBox Track';
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: trackTitle,
+          artist: 'SyncBox Synchronized Audio',
+          album: 'SyncBox Room'
+        });
+
+        navigator.mediaSession.setActionHandler('play', () => {
+          this.play();
+        });
+        navigator.mediaSession.setActionHandler('pause', () => {
+          this.pause();
+        });
+        navigator.mediaSession.setActionHandler('stop', () => {
+          this.stop();
+        });
+        navigator.mediaSession.setActionHandler('seekto', (details) => {
+          if (details && details.seekTime !== undefined) {
+            this.seek(details.seekTime);
+          }
+        });
+      } catch (e) {
+        console.warn('[AudioEngine] MediaSession warning:', e.message);
+      }
+    }
+  }
+
+  /**
+   * Updates OS lock-screen MediaSession playback state.
+   */
+  updateMediaSessionState(state) {
+    if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+      try {
+        if (state === 'PLAYING') {
+          navigator.mediaSession.playbackState = 'playing';
+        } else if (state === 'PAUSED') {
+          navigator.mediaSession.playbackState = 'paused';
+        } else {
+          navigator.mediaSession.playbackState = 'none';
+        }
+      } catch (e) {}
+    }
   }
 
   /**
@@ -280,6 +363,8 @@ class AudioEngine {
     }
 
     source.start(0, this.startOffset);
+    this.playSilentBridge();
+    this.updateMediaSessionState('PLAYING');
     return true;
   }
 
@@ -329,6 +414,8 @@ class AudioEngine {
       this.startTime = 0;
       this.playbackRateValue = 1.0;
       this.activeSource = null;
+      this.pauseSilentBridge();
+      this.updateMediaSessionState('STOPPED');
 
       if (this.onEndedCallback) {
         this.onEndedCallback();
@@ -342,6 +429,8 @@ class AudioEngine {
 
     // Schedule Web Audio API hardware start
     source.start(targetAudioCtxTime, this.startOffset);
+    this.playSilentBridge();
+    this.updateMediaSessionState('PLAYING');
     return true;
   }
 
@@ -360,6 +449,8 @@ class AudioEngine {
     this.stopActiveSourceOnly();
     this.playbackRateValue = 1.0; // Reset rate on pause
     this.playbackState = 'PAUSED';
+    this.pauseSilentBridge();
+    this.updateMediaSessionState('PAUSED');
   }
 
   /**
@@ -371,6 +462,8 @@ class AudioEngine {
     this.startTime = 0;
     this.playbackRateValue = 1.0; // Reset rate on stop
     this.playbackState = 'STOPPED';
+    this.pauseSilentBridge();
+    this.updateMediaSessionState('STOPPED');
   }
 
   /**
