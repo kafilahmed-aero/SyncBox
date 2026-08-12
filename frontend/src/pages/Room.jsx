@@ -16,8 +16,41 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
   const [isActivating, setIsActivating] = useState(false);
   const [audioError, setAudioError] = useState(null);
 
-  // Per-Device Physical Audio Calibration Offset State (seconds, saved per-device in localStorage)
+  // Per-Device Physical Audio Calibration Offset State & Debug Touch Log
   const [userOffset, setUserOffset] = useState(() => audioEngine.getUserOffset());
+  const [lastTouchLog, setLastTouchLog] = useState('');
+
+  // Per-Device Sync Calibration Offset Handler (Touch & Pointer Interception + Live Dynamic Audio Shift)
+  const handleAdjustOffset = (deltaSec, e) => {
+    if (e) {
+      if (e.cancelable) e.preventDefault();
+      e.stopPropagation();
+    }
+
+    const currentOffset = audioEngine.getUserOffset();
+    const newOffset = deltaSec === 0 ? 0.0 : Number((currentOffset + deltaSec).toFixed(2));
+    
+    // 1. Directly mutate AudioEngine offset and localStorage
+    audioEngine.setUserOffset(newOffset);
+
+    // 2. Dynamic live playback position shift if audio is currently playing
+    if (audioEngine.getPlaybackState() === 'PLAYING') {
+      const currentPos = audioEngine.getCurrentPosition();
+      const newPos = Math.max(0, currentPos - deltaSec);
+      console.log(`[Room Touch Adjust] Shifting live playback from ${currentPos.toFixed(2)}s to ${newPos.toFixed(2)}s`);
+      audioEngine.seek(newPos);
+    }
+
+    // 3. Update React component state for deterministic UI re-render
+    setUserOffset(newOffset);
+
+    // 4. Record touch log for instant visual feedback on mobile touchscreens
+    const actionLabel = deltaSec === 0 
+      ? 'Reset to 0.00s' 
+      : `Tapped ${deltaSec > 0 ? '+' : ''}${deltaSec.toFixed(1)}s (Offset: ${newOffset >= 0 ? '+' : ''}${newOffset.toFixed(2)}s)`;
+    setLastTouchLog(actionLabel);
+    console.log(`[Room Touch Adjust] ${actionLabel}`);
+  };
 
   // Real Audio Preparation State (NO SONG | SONG SELECTED | PREPARING | READY)
   const [songPrepState, setSongPrepState] = useState(() => {
@@ -558,10 +591,10 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
                     type="button"
                     className="btn btn-secondary"
                     style={{
-                      width: '3.5rem',
-                      height: '3.0rem',
-                      fontSize: '1.5rem',
-                      fontWeight: 700,
+                      width: '3.8rem',
+                      height: '3.2rem',
+                      fontSize: '1.6rem',
+                      fontWeight: 800,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -569,16 +602,20 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
                       backgroundColor: '#1E293B',
                       borderColor: '#334155',
                       color: '#F8FAFC',
-                      cursor: 'pointer'
+                      cursor: 'pointer',
+                      touchAction: 'manipulation',
+                      userSelect: 'none',
+                      WebkitUserSelect: 'none'
                     }}
-                    onClick={() => handleAdjustOffset(-0.1)}
+                    onTouchStart={(e) => handleAdjustOffset(-0.1, e)}
+                    onClick={(e) => handleAdjustOffset(-0.1, e)}
                     title="Decrement offset by -0.1s (-100ms)"
                   >
                     −
                   </button>
 
                   <div style={{ textAlign: 'center', minWidth: '7.5rem' }}>
-                    <div style={{ fontSize: '1.5rem', fontWeight: 800, color: userOffset === 0 ? '#F8FAFC' : '#38BDF8', fontFamily: 'monospace' }}>
+                    <div style={{ fontSize: '1.6rem', fontWeight: 800, color: userOffset === 0 ? '#F8FAFC' : '#38BDF8', fontFamily: 'monospace' }}>
                       {userOffset >= 0 ? `+${userOffset.toFixed(2)}s` : `${userOffset.toFixed(2)}s`}
                     </div>
                     <div style={{ fontSize: '0.65rem', color: '#94A3B8', marginTop: '0.1rem' }}>
@@ -590,10 +627,10 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
                     type="button"
                     className="btn btn-secondary"
                     style={{
-                      width: '3.5rem',
-                      height: '3.0rem',
-                      fontSize: '1.5rem',
-                      fontWeight: 700,
+                      width: '3.8rem',
+                      height: '3.2rem',
+                      fontSize: '1.6rem',
+                      fontWeight: 800,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -601,21 +638,32 @@ export default function Room({ roomCode = 'ABC123', isHost = true, initialRoomDa
                       backgroundColor: '#1E293B',
                       borderColor: '#334155',
                       color: '#F8FAFC',
-                      cursor: 'pointer'
+                      cursor: 'pointer',
+                      touchAction: 'manipulation',
+                      userSelect: 'none',
+                      WebkitUserSelect: 'none'
                     }}
-                    onClick={() => handleAdjustOffset(+0.1)}
+                    onTouchStart={(e) => handleAdjustOffset(+0.1, e)}
+                    onClick={(e) => handleAdjustOffset(+0.1, e)}
                     title="Increment offset by +0.1s (+100ms)"
                   >
                     +
                   </button>
                 </div>
 
+                {lastTouchLog && (
+                  <div style={{ fontSize: '0.65rem', color: '#10B981', marginTop: '0.4rem', textAlign: 'center', fontWeight: 600 }}>
+                    ✓ {lastTouchLog}
+                  </div>
+                )}
+
                 {userOffset !== 0 && (
                   <div style={{ textAlign: 'center', marginTop: '0.5rem' }}>
                     <button
                       type="button"
-                      style={{ background: 'none', border: 'none', color: '#64748B', fontSize: '0.65rem', cursor: 'pointer', textDecoration: 'underline' }}
-                      onClick={() => handleAdjustOffset(0)}
+                      style={{ background: 'none', border: 'none', color: '#64748B', fontSize: '0.65rem', cursor: 'pointer', textDecoration: 'underline', touchAction: 'manipulation' }}
+                      onTouchStart={(e) => handleAdjustOffset(0, e)}
+                      onClick={(e) => handleAdjustOffset(0, e)}
                     >
                       Reset to 0.00s
                     </button>
