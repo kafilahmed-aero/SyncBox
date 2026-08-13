@@ -61,7 +61,7 @@ npm install
 npm run dev
 ```
 Access Backend at: `http://localhost:4000`  
-Health Endpoint: `http://localhost:4000/health`  
+Health Endpoint: `http://localhost:4000/health` (also available at `/api/health`)  
 Test Suite: `npm test`
 
 ---
